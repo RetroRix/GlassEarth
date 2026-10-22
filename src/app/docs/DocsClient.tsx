@@ -727,6 +727,7 @@ mcp_servers:
                 {l.label}
               </a>
             ))}
+            <span className="opacity-80">Glass Earth by Rick Quast</span>
             <span className="ml-auto opacity-60">MIT Licensed</span>
           </footer>
         </main>

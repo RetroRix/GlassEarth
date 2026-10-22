@@ -232,6 +232,6 @@ MIT — see [LICENSE](LICENSE) for details. Glass Earth is based on the OSIRIS p
 
 <div align="center">
 
-**Built by [RetroRix](https://github.com/RetroRix) · Based on [OSIRIS](https://github.com/simplifaisoul/osiris) by simplifaisoul (MIT)**
+**Built by Rick Quast · Based on [OSIRIS](https://github.com/simplifaisoul/osiris) by simplifaisoul (MIT)**
 
 </div>
