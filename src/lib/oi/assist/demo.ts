@@ -51,7 +51,7 @@ export function demoAssist(prompt: string): string {
       return json(quotes.map(q => `- ${q[1]}: ${Number(q[2]).toLocaleString('en-US')}${q[3] !== 'null' ? ` (${Number(q[3]) >= 0 ? '+' : ''}${q[3]}%)` : ''}`).join('\n'));
     }
     const looked = lines.find(l => l.tool === 'camera');
-    if (looked) return json(`${looked.summary}. The boxes are on the camera now: counted by OSIRIS on your device.`);
+    if (looked) return json(`${looked.summary}. The boxes are on the camera now: counted by Glass Earth on your device.`);
     const summary = lines.find(l => l.tool === 'find')?.summary ?? lines.map(l => l.summary).join('; ');
     return json(names.length ? `${summary}. The top ones: ${names.join(', ')}. They are marked on the map; click any in the list to fly to it.` : `${summary}.`);
   }

@@ -1,4 +1,4 @@
-# Osiris Global Intelligence Platform
+# Glass Earth — the live planet on one globe
 # https://osirisai.live
 
 User-agent: *

@@ -208,12 +208,12 @@ function heuristicOverview(mode: Mode, digest: Digest): string {
 }
 
 const SYSTEM_DEFAULT =
-  'You are OSIRIS, a terse intelligence analyst. Given structured facts, write a sharp 2-4 sentence situational read-out. No preamble, no markdown headers, no hedging. Lead with the bottom line.';
+  'You are the Glass Earth analyst, a terse intelligence analyst. Given structured facts, write a sharp 2-4 sentence situational read-out. No preamble, no markdown headers, no hedging. Lead with the bottom line.';
 
 /* Alerts come from newsrooms with declared leanings, so the read-out has to
    keep every claim attached to whoever published it. */
 const SYSTEM_ALERTS = [
-  'You are OSIRIS, an OSINT analyst writing a situational read-out from a feed of news wire and newsroom reports.',
+  'You are the Glass Earth analyst, writing a situational read-out from a feed of news wire and newsroom reports.',
   'Write 3-5 sentences of plain prose: no preamble, no headers, no bullet points. Lead with the bottom line.',
   'Attribute each claim to the outlet that published it and give its declared perspective, e.g. "per TASS (Russian state agency)".',
   'These outlets have declared leanings and a report is not verification. Say when a story is carried by only one side, and when Western and Russian-aligned outlets both carry it. Never state an unverified claim as fact.',

@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import ErrorBoundary from '@/components/ErrorBoundary';
 import "./globals.css";
 
-const SITE_URL = "https://osirisai.live";
-const SITE_NAME = "OSIRIS";
-const SITE_TITLE = "OSIRIS — Open Source Intelligence Platform | Live Flight Tracking, CCTV, OSINT Tools & More";
-const SITE_DESCRIPTION = "The open-source Palantir alternative. Track live aircraft, satellites, and worldwide CCTV cameras on a 3D globe. Run Nmap scans, DNS lookups, WHOIS queries, SSL cert analysis & threat intelligence — all from your browser. 20+ data sources including live earthquake, wildfire, cyber threat and conflict feeds, plus mapped reference data such as nuclear facilities. Free & open source.";
+const SITE_URL = "https://github.com/RetroRix/GlassEarth";
+const SITE_NAME = "Glass Earth";
+const SITE_TITLE = "Glass Earth — The Live Planet on One Globe | Live Flights, Satellites, CCTV, Weather & Alerts";
+const SITE_DESCRIPTION = "The live planet on one globe: live aircraft, satellites and worldwide CCTV cameras on a 3D globe, with earthquakes, wildfires, severe weather, live news and markets — 20+ live data sources, plus your own aircraft. Based on the open-source OSIRIS project (MIT).";
 
 export const viewport: Viewport = {
   themeColor: "#D4AF37",
@@ -19,23 +19,12 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: SITE_TITLE,
-    template: "%s | OSIRIS Intelligence",
+    template: "%s | Glass Earth",
   },
   description: SITE_DESCRIPTION,
   keywords: [
-    // OSINT Tools - Primary focus
-    "OSINT tools", "free OSINT tools", "online OSINT toolkit", "OSINT framework",
-    "nmap online", "nmap scanner online", "free nmap scan", "port scanner online",
-    "DNS lookup tool", "WHOIS lookup", "reverse DNS", "DNS records",
-    "SSL certificate checker", "certificate transparency", "cert lookup",
-    "BGP routing lookup", "ASN lookup", "IP geolocation",
-    "threat intelligence", "threat intel lookup", "IP reputation check",
-    "network reconnaissance", "recon tools", "penetration testing tools",
-    "cybersecurity tools", "infosec tools", "security scanner",
-    "linux OSINT tools", "kali linux tools online", "OSINT browser tools",
-    
     // Intelligence Platform
-    "OSINT", "open source intelligence", "intelligence platform", "global intelligence",
+    "live earth dashboard", "global intelligence", "live globe",
     "geospatial intelligence", "GEOINT", "SIGINT", "real-time tracking",
     "palantir alternative", "open source palantir", "intelligence dashboard",
     
@@ -52,11 +41,11 @@ export const metadata: Metadata = {
     "defense stocks", "commodities tracker",
     
     // Brand
-    "osiris", "osirisai", "osirisai.live",
+    "glass earth", "glassearth",
   ],
-  authors: [{ name: "Osiris Project", url: SITE_URL }],
-  creator: "Osiris Project",
-  publisher: "Osiris Project",
+  authors: [{ name: "RetroRix", url: SITE_URL }],
+  creator: "RetroRix",
+  publisher: "RetroRix",
   robots: {
     index: true,
     follow: true,
@@ -91,8 +80,8 @@ export const metadata: Metadata = {
     canonical: SITE_URL,
   },
   openGraph: {
-    title: "OSIRIS — The Open-Source Palantir Alternative | Live Flights, CCTV, Satellites & OSINT Tools",
-    description: "Track 10K+ aircraft, 2K satellites & worldwide CCTV on a 3D globe. Run Nmap, DNS, WHOIS & threat intel scans from your browser. 20+ live intelligence feeds. Free. Open source.",
+    title: "Glass Earth — The Live Planet on One Globe | Live Flights, CCTV, Satellites & Weather",
+    description: "Track 10K+ aircraft, 2K satellites & worldwide CCTV on a 3D globe, with live earthquakes, fires, weather, news and markets. 20+ live feeds. Based on OSIRIS (MIT).",
     type: "website",
     siteName: SITE_NAME,
     locale: "en_US",
@@ -102,25 +91,23 @@ export const metadata: Metadata = {
         url: `${SITE_URL}/og-image.png`,
         width: 1200,
         height: 630,
-        alt: "OSIRIS — Open Source Intelligence Platform with Live Tracking & OSINT Tools",
+        alt: "Glass Earth — the live planet on one globe, with live flight, satellite and CCTV tracking",
         type: "image/png",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "🛰️ OSIRIS — Open Source Palantir Alternative | Live Tracking + OSINT Tools",
-    description: "Track 10K+ flights, satellites & CCTV worldwide. Run Nmap, DNS, WHOIS scans from your browser. 20+ live intel feeds. Free & open source.",
-    creator: "@simplifaisoul",
-    site: "@simplifaisoul",
+    title: "🌍 Glass Earth — The Live Planet on One Globe | Live Flights, CCTV, Satellites & Weather",
+    description: "Track 10K+ flights, satellites & CCTV worldwide, plus quakes, fires, weather, news and markets. 20+ live feeds.",
     images: [`${SITE_URL}/og-image.png`],
   },
   category: "technology",
-  classification: "Intelligence & Security",
+  classification: "Maps & Live Data",
   other: {
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
-    "apple-mobile-web-app-title": "OSIRIS",
+    "apple-mobile-web-app-title": "Glass Earth",
     "mobile-web-app-capable": "yes",
     "msapplication-TileColor": "#06060C",
     "msapplication-config": "none",
@@ -131,11 +118,11 @@ export const metadata: Metadata = {
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
-  name: "OSIRIS — OSINT Toolkit & Intelligence Platform",
-  alternateName: ["OSIRIS", "OsirisAI", "Osiris OSINT"],
+  name: "Glass Earth — Live Planet Dashboard",
+  alternateName: ["Glass Earth"],
   url: SITE_URL,
   description: SITE_DESCRIPTION,
-  applicationCategory: "SecurityApplication",
+  applicationCategory: "TravelApplication",
   operatingSystem: "Web",
   browserRequirements: "Requires a modern web browser",
   offers: {
@@ -145,12 +132,6 @@ const jsonLd = {
     availability: "https://schema.org/InStock",
   },
   featureList: [
-    "Nmap port scanning from the browser — no install required",
-    "DNS record lookup (A, AAAA, MX, NS, TXT, CNAME)",
-    "WHOIS domain registration lookup",
-    "SSL/TLS certificate transparency search",
-    "BGP routing & ASN lookup",
-    "IP geolocation & threat intelligence",
     "Real-time flight tracking via ADS-B",
     "Satellite tracking (including ISS)",
     "Worldwide CCTV camera monitoring",
@@ -169,7 +150,7 @@ const jsonLd = {
   screenshot: `${SITE_URL}/og-image.png`,
   author: {
     "@type": "Organization",
-    name: "Osiris Project",
+    name: "RetroRix",
     url: SITE_URL,
   },
 };
@@ -198,7 +179,7 @@ export default function RootLayout({
 
       </head>
       <body className="antialiased">
-        <ErrorBoundary name="OSIRIS Core">
+        <ErrorBoundary name="Glass Earth Core">
           {children}
         </ErrorBoundary>
       </body>

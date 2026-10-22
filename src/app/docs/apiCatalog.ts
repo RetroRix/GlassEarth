@@ -281,7 +281,7 @@ export const API_GROUPS: ApiGroup[] = [
         summary: "A still camera's current frame, for the built-in detector (AI Analyze, OI Assist, forecasts).",
         params: [{ name: 'id', required: true, desc: 'Camera id from /api/cctv.' }],
         returns: ['image/jpeg | image/png | image/webp | image/gif', 'X-Frame-At header'],
-        notes: 'Takes a camera id, never a URL: only cameras in the OSIRIS catalogue. Frames are held for 4 s; 90 requests a minute per client.',
+        notes: 'Takes a camera id, never a URL: only cameras in the Glass Earth catalogue. Frames are held for 4 s; 90 requests a minute per client.',
       },
       {
         path: '/api/infrastructure',
@@ -437,7 +437,7 @@ export const API_GROUPS: ApiGroup[] = [
     id: 'oi',
     title: 'OI (Assist & Prediction)',
     blurb:
-      'OI Assist, a model on your own key that works the map in conversation, and a prediction engine on live OSIRIS intelligence: it casts the actors who decide a question, plays them against each other over dated periods in several parallel worlds, and a report agent writes the predicted path with a calibrated figure. Your model key is sent in headers and never stored. Also served as an MCP server at /api/mcp; see OI guide.',
+      'OI Assist, a model on your own key that works the map in conversation, and a prediction engine on live Glass Earth intelligence: it casts the actors who decide a question, plays them against each other over dated periods in several parallel worlds, and a report agent writes the predicted path with a calibrated figure. Your model key is sent in headers and never stored. Also served as an MCP server at /api/mcp; see OI guide.',
     endpoints: [
       {
         path: '/api/oi',
@@ -464,7 +464,7 @@ export const API_GROUPS: ApiGroup[] = [
         returns: ['id', 'status', 'phase', 'watch_url', 'events_url', 'run_token', 'progress'],
         headers: { 'X-OI-Provider': 'openai', 'X-OI-Key': '$YOUR_MODEL_KEY', 'X-OI-Model': 'gpt-5-mini' },
         requiresAuth: true,
-        notes: '`depth` is `quick` (4 actors × 3 periods × 2 worlds, about 34 model calls), `standard` (6 × 4 × 3, about 88) or `deep` (7 × 4 × 4, about 132). A world that settles early stops spending calls. `seed` takes up to 100,000 characters of your own data (about 25,000 input tokens), read once by the world model; with `seed_scope: "panel"` every actor’s move and the report agent also read its first 8,000 characters, at about 2,000 more input tokens a call. `use_feeds` (default true) has the run research the question first (recent news with its links, from GDELT and Wikipedia’s Current events, and Wikipedia background) and read OSIRIS news, quakes and markets; the actors quote these sources by id: articles (`w`), market data (`q`), prediction markets (`m`), background (`b`), the live feeds (`c`). Keep `run_token`: it is not shown again. Two runs at once and eight per ten minutes per address.',
+        notes: '`depth` is `quick` (4 actors × 3 periods × 2 worlds, about 34 model calls), `standard` (6 × 4 × 3, about 88) or `deep` (7 × 4 × 4, about 132). A world that settles early stops spending calls. `seed` takes up to 100,000 characters of your own data (about 25,000 input tokens), read once by the world model; with `seed_scope: "panel"` every actor’s move and the report agent also read its first 8,000 characters, at about 2,000 more input tokens a call. `use_feeds` (default true) has the run research the question first (recent news with its links, from GDELT and Wikipedia’s Current events, and Wikipedia background) and read Glass Earth news, quakes and markets; the actors quote these sources by id: articles (`w`), market data (`q`), prediction markets (`m`), background (`b`), the live feeds (`c`). Keep `run_token`: it is not shown again. Two runs at once and eight per ten minutes per address.',
         bodyExample: `{
   "question": "Will Brent crude settle above $90 on 31 December 2026?",
   "depth": "standard",
@@ -544,7 +544,7 @@ export const API_GROUPS: ApiGroup[] = [
       {
         path: '/api/mcp',
         method: 'POST',
-        summary: 'OI and live OSIRIS intelligence as an MCP server (Streamable HTTP, stateless) for agents such as Hermes, Claude and Cursor.',
+        summary: 'OI and live Glass Earth intelligence as an MCP server (Streamable HTTP, stateless) for agents such as Hermes, Claude and Cursor.',
         returns: ['jsonrpc', 'id', 'result'],
         headers: { Accept: 'application/json, text/event-stream', 'X-OI-Provider': 'openai', 'X-OI-Key': '$YOUR_MODEL_KEY' },
         notes: 'Tools: `oi_predict`, `oi_get_run`, `oi_ask`, `oi_inject`, `oi_cancel`, `oi_info`, and the free `osiris_world_brief`, `osiris_markets` and `osiris_trending`, which need no key. A call that waits on a forecast streams progress notifications when the client accepts SSE. Protocol versions 2025-06-18, 2025-03-26 and 2024-11-05.',

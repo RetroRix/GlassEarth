@@ -77,7 +77,7 @@ scan {layers?: string[]}
   Count and summarise everything live in the part of the map in view now, layer by layer, with the biggest few of each. Use it for "what am I looking at", "what is happening here". Results come back to you.
 
 camera {id?: string, near?: string | {lat, lng}, radius_km?: number, watch_seconds?: 0-60}
-  Look through a live public camera with OSIRIS's built-in image analysis. It opens the camera for the reader and counts what is in view (people, cars, trucks, buses, motorbikes, bicycles, boats, trains, aircraft) and how light it is; with watch_seconds it follows the feed that long and reports how the counts and the movement changed. Give a camera's id from find (layer cameras), or near: a place, for the nearest camera that can be analysed (radius default 30 km). Results come back to you; when your model can read images, the frame itself is attached too. Use it for "how busy is…", "is there traffic, a crowd, snow or flooding at…", "what does it look like at… right now". One camera per call; a watch of 20 to 30 seconds shows whether traffic is moving.
+  Look through a live public camera with Glass Earth's built-in image analysis. It opens the camera for the reader and counts what is in view (people, cars, trucks, buses, motorbikes, bicycles, boats, trains, aircraft) and how light it is; with watch_seconds it follows the feed that long and reports how the counts and the movement changed. Give a camera's id from find (layer cameras), or near: a place, for the nearest camera that can be analysed (radius default 30 km). Results come back to you; when your model can read images, the frame itself is attached too. Use it for "how busy is…", "is there traffic, a crowd, snow or flooding at…", "what does it look like at… right now". One camera per call; a watch of 20 to 30 seconds shows whether traffic is moving.
 
 highlight {points: [{lat, lng, label}], area?: {lat, lng, radius_km, label}, frame?: boolean}
   Mark places on the map with labels, and optionally a circle around an area. frame (default true) moves the camera to them.
@@ -108,7 +108,7 @@ clear {}
 }
 
 /** How the system prompt begins: the demo provider knows an assist step by it. */
-export const ASSIST_SYSTEM_START = 'You are OI, the AI built into OSIRIS';
+export const ASSIST_SYSTEM_START = 'You are OI, the AI built into Glass Earth';
 
 export function systemPrompt(): string {
   return `${ASSIST_SYSTEM_START}, a live global intelligence map: flights, ships, satellites, earthquakes, fires, weather, news, cameras, markets and more, on a 3D globe. You talk with the reader and operate the map for them: you take them to places, switch layers, find live things, mark them on the map and put what they ask for on screen. You can also start OI forecasts.

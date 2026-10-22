@@ -24,7 +24,7 @@ const PORT = process.env.INTEL_PORT || 4000;
 // ════════════════════════════════════════════════════
 
 const WIKIDATA_ENDPOINT = 'https://query.wikidata.org/sparql';
-const WIKIDATA_UA = 'OSIRIS-Intel/1.0 (https://osirisai.live; ontology engine)';
+const WIKIDATA_UA = 'GlassEarth-Intel/1.0 (https://github.com/RetroRix/GlassEarth; ontology engine)';
 const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_MAX = 10_000;
 
