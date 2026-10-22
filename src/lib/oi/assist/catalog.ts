@@ -106,7 +106,7 @@ export const SOURCES: Record<FindLayer, Source> = {
     },
   },
   news: {
-    about: 'Live news and OSINT reports (Telegram channels, wires). Some are placed on the map where they name a place. value = keyword risk score.',
+    about: 'Live news reports from the wire services. Some are placed on the map where they name a place. value = keyword risk score.',
     layers: [], keys: ['news'], value: 'risk score',
     normalize: (r, i) => {
       const place = (r.place && typeof r.place === 'object' ? r.place : {}) as Row;
@@ -313,7 +313,6 @@ export const LAYERS: Record<string, string> = {
 export const PANELS: Record<string, string> = {
   markets: 'markets terminal: indices, commodities, crypto, FX',
   alerts: 'live alerts feed with the AI overview',
-  intel: 'OSINT recon tools (IP, domain, username lookups)',
   layers: 'the layer panel',
   directions: 'driving directions',
   forecast: 'the OI forecast panel (the prediction engine)',

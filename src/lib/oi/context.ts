@@ -2,9 +2,9 @@
  * The live world a run starts from: OSIRIS's own news feed, the day's large
  * earthquakes and a line of market prices, cut down to what bears on the
  * question. Read in-process from the same cached sources the map uses, so a
- * run adds no upstream traffic of its own. The feed carries posts from public
- * Telegram channels beside the wire services: those are kept as what they
- * are, posts on a social network (`social`), never passed off as reporting.
+ * run adds no upstream traffic of its own. Anything in the feed that arrives
+ * via a social-network URL is kept as what it is (`social`), never passed
+ * off as wire reporting.
  */
 import type { ContextItem } from './types';
 import { text } from './parse';
