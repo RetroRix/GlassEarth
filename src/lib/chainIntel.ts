@@ -1,4 +1,3 @@
-import { matchExact, type SanctionEntry } from '@/lib/sanctions';
 
 /**
  * ═══════════════════════════════════════════════════════════════
@@ -105,7 +104,6 @@ export interface WalletIntel {
   flow: { total_in: number; total_out: number; net: number } | null;
   counterparties: Counterparty[];
   transactions: TxSummary[];
-  sanctions: { screened: boolean; hit: boolean; entries: SanctionEntry[] };
   risk: { score: number; level: Severity; factors: RiskFactor[] };
   labels: string[];
   tokens: { symbol: string; name: string; amount: number | null }[];
@@ -436,7 +434,7 @@ function scoreRisk(
     (acc, f) => (LEVEL_ORDER.indexOf(f.severity) > LEVEL_ORDER.indexOf(acc) ? f.severity : acc),
     'info'
   );
-  // A sanctions hit must never be diluted by an otherwise-quiet wallet.
+  // A critical factor must never be diluted by an otherwise-quiet wallet.
   if (highest === 'critical') return { score: Math.max(score, 95), level: 'critical' };
   const level: Severity = score >= 70 ? 'high' : score >= 40 ? 'medium' : score >= 15 ? 'low' : 'info';
   return { score, level };
@@ -446,20 +444,9 @@ function buildFactors(
   raw: RawWallet,
   meta: { symbol: string },
   activity: WalletIntel['activity'],
-  counterparties: Counterparty[],
-  sanctionHits: SanctionEntry[]
+  counterparties: Counterparty[]
 ): RiskFactor[] {
   const f: RiskFactor[] = [];
-
-  if (sanctionHits.length) {
-    f.push({
-      code: 'OFAC_SDN',
-      label: 'OFAC-sanctioned address',
-      severity: 'critical',
-      weight: 100,
-      detail: `Listed on the US OFAC SDN list as: ${sanctionHits.slice(0, 3).map(e => e.name).join('; ')}`,
-    });
-  }
 
   if (activity.age_days !== null && activity.age_days < 7) {
     f.push({
@@ -556,16 +543,13 @@ export async function analyseAddress(addressRaw: string, chainOverride?: Chain):
 
   const meta = CHAIN_META[chain];
 
-  const [raw, price, sanctionHits] = await Promise.all([
+  const [raw, price] = await Promise.all([
     chain === 'bitcoin'
       ? collectBitcoin(address)
       : chain === 'ethereum'
         ? collectEthereum(address)
         : collectSolana(address),
     fetchPrice(chain),
-    // OFAC lists sanctioned wallets as entity names, so an exact-name lookup
-    // is the correct screen; normalisation lower-cases both sides.
-    matchExact(address).catch(() => [] as SanctionEntry[]),
   ]);
 
   const times = raw.transactions.map(t => t.time).filter((t): t is string => !!t).sort();
@@ -587,7 +571,7 @@ export async function analyseAddress(addressRaw: string, chainOverride?: Chain):
   };
 
   const counterparties = aggregateCounterparties(raw.transactions);
-  const factors = buildFactors(raw, meta, activity, counterparties, sanctionHits);
+  const factors = buildFactors(raw, meta, activity, counterparties);
   const risk = scoreRisk(factors);
 
   return {
@@ -605,11 +589,10 @@ export async function analyseAddress(addressRaw: string, chainOverride?: Chain):
     flow: raw.flow,
     counterparties,
     transactions: raw.transactions.slice(0, 25),
-    sanctions: { screened: true, hit: sanctionHits.length > 0, entries: sanctionHits.slice(0, 5) },
     risk: { ...risk, factors },
     labels: raw.labels,
     tokens: raw.tokens,
-    sources: [...raw.sources, 'CoinGecko', 'OpenSanctions / US OFAC SDN'],
+    sources: [...raw.sources, 'CoinGecko'],
     partial: raw.partial,
   };
 }

@@ -18,7 +18,7 @@ export const metadata: Metadata = {
  *
  * Reviewed 2026-10-04 against: src/app/api/geo, src/app/api/osint/*,
  * src/app/api/ai/*, src/app/api/oi/*, src/lib/oi/* (client, service, web,
- * newsroom, markets), src/lib/sanctions.ts, src/lib/sherlock.ts,
+ * newsroom, markets), src/lib/sherlock.ts,
  * src/lib/chainIntel.ts, src/app/page.tsx (IP location, storage),
  * src/components/OsirisMap.tsx (base map, satellite), src/app/globals.css
  * (fonts), src/components/LiveAlerts.tsx, src/lib/live-clouds.ts,
@@ -179,8 +179,7 @@ export default function PrivacyPage() {
                 The RECON tools answer by asking the public service that holds the answer, from our server. That service
                 sees the email, domain, address or name you looked up, but not who you are. Two checks never leave our
                 server at all: <span className="text-[var(--text-primary)]">phone numbers</span> are read with a library
-                that runs here, and <span className="text-[var(--text-primary)]">sanctions searches</span> run against a
-                copy of the published list we keep.
+                that runs here.
               </>}
               services={[
                 { name: 'XposedOrNot', what: 'an email address, for breach checks' },

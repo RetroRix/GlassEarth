@@ -1,65 +1,10 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { createRequire } from 'node:module';
-import type { AddressInfo } from 'node:net';
 
 // The intel service is plain CommonJS; required here it exports its pieces without starting.
 const intel = createRequire(import.meta.url)('./server.js');
 
-const CSV = (rows: string[]) => ['id,schema,name,aliases,countries,program_ids,sanctions', ...rows].join('\n');
-const goodCsv = CSV(['NK-1,Company,Example Sanctioned Company,,ir,SDGT,OFAC']);
-
 afterEach(() => vi.unstubAllGlobals());
-
-describe('buildSanctionsIndex', () => {
-  it('indexes a well-formed file', () => {
-    expect(intel.buildSanctionsIndex(goodCsv).entries).toHaveLength(1);
-  });
-
-  it('refuses a file without the id and name columns', () => {
-    expect(() => intel.buildSanctionsIndex('unexpected,columns\nx,y')).toThrow(/id\/name/);
-  });
-
-  it('refuses a file with no named entries', () => {
-    expect(() => intel.buildSanctionsIndex(CSV([',Company,,,,,']))).toThrow(/no named entries/);
-  });
-
-  it('refuses a file that would halve the index', () => {
-    expect(() => intel.buildSanctionsIndex(goodCsv, 10)).toThrow(/against 10 held/);
-  });
-});
-
-describe('loadSanctions', () => {
-  const serve = (body: string) => vi.stubGlobal('fetch', vi.fn(async () => new Response(body)));
-
-  it('keeps the working index when a refresh brings a broken file', async () => {
-    serve(goodCsv);
-    await intel.loadSanctions();
-    expect(intel.sanctionsSearch('Example Sanctioned Company')).toHaveLength(1);
-
-    serve('unexpected,columns\nx,y');
-    await intel.loadSanctions();
-    expect(intel.sanctionsSearch('Example Sanctioned Company')).toHaveLength(1);
-  });
-
-  it('reports the refused refresh in /health', async () => {
-    serve(goodCsv);
-    await intel.loadSanctions();
-    serve('<html>CDN error</html>');
-    await intel.loadSanctions();
-    vi.unstubAllGlobals();
-
-    const server = intel.app.listen(0);
-    try {
-      const { port } = server.address() as AddressInfo;
-      const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
-      expect(health.status).toBe('degraded');
-      expect(health.sanctions_entries).toBe(1);
-      expect(health.sanctions_last_error).toBeTruthy();
-    } finally {
-      server.close();
-    }
-  });
-});
 
 describe('normalizeId', () => {
   it('keeps accented and non-Latin names as written', () => {

@@ -1,13 +1,10 @@
-import { allEntries, type SanctionEntry } from '@/lib/sanctions';
-
 /**
  * ═══════════════════════════════════════════════════════════════
  *  OSIRIS — Daily chain-threat brief
  *
- *  Three independent keyless feeds, each verified against live data:
+ *  Two independent keyless feeds, each verified against live data:
  *    exploits   DefiLlama /hacks       — dated on-chain incidents + losses
  *    cves       NVD 2.0 keyword+range  — crypto/blockchain vulnerabilities
- *    sanctions  OpenSanctions OFAC SDN — designated wallet addresses
  *
  *  Sections degrade independently: one dead upstream must never blank the
  *  brief, so every collector resolves to an empty section plus a stated
@@ -38,26 +35,16 @@ export interface CveItem {
   url: string;
 }
 
-export interface SanctionedWallet {
-  address: string;
-  asset: 'BTC' | 'ETH' | 'XMR' | 'TRX' | 'OTHER';
-  entity: string;
-  programs: string[];
-  first_seen: string | null;
-}
-
 export interface DailyBrief {
   generated_at: string;
   window_days: number;
   exploits: Exploit[];
   cves: CveItem[];
-  sanctioned_wallets: SanctionedWallet[];
   totals: {
     exploit_count: number;
     exploit_losses_usd: number;
     cve_count: number;
     critical_cves: number;
-    sanctioned_wallet_count: number;
   };
   /** Sections that failed or are incomplete, with the reason. */
   degraded: string[];
@@ -174,50 +161,6 @@ async function collectCves(days: number): Promise<{ items: CveItem[]; degraded: 
   return { items, degraded };
 }
 
-/** Address shapes used to classify a designated wallet by asset. */
-const ASSET_PATTERNS: [SanctionedWallet['asset'], RegExp][] = [
-  ['ETH', /^0x[a-fA-F0-9]{40}$/],
-  ['BTC', /^(bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/],
-  ['XMR', /^4[0-9AB][1-9A-HJ-NP-Za-km-z]{93}$/],
-  ['TRX', /^T[1-9A-HJ-NP-Za-km-z]{33}$/],
-];
-
-function classifyAsset(name: string): SanctionedWallet['asset'] | null {
-  for (const [asset, re] of ASSET_PATTERNS) if (re.test(name)) return asset;
-  return null;
-}
-
-/**
- * OFAC designates crypto wallets as standalone entries whose *name* is the
- * address itself, so scanning names by address shape is the correct filter.
- */
-async function collectSanctionedWallets(days: number): Promise<{ items: SanctionedWallet[]; degraded: string[] }> {
-  try {
-    const entries = await allEntries();
-    const cutoff = Date.now() - days * 864e5;
-    const items: SanctionedWallet[] = [];
-
-    for (const e of entries as SanctionEntry[]) {
-      const asset = classifyAsset(e.name);
-      if (!asset) continue;
-      const seen = e.first_seen ? Date.parse(e.first_seen) : NaN;
-      if (Number.isFinite(seen) && seen < cutoff) continue;
-      items.push({
-        address: e.name,
-        asset,
-        entity: e.aliases[0] || e.sanctions || 'OFAC SDN designation',
-        programs: e.programs,
-        first_seen: e.first_seen ?? null,
-      });
-    }
-
-    items.sort((a, b) => (Date.parse(b.first_seen || '') || 0) - (Date.parse(a.first_seen || '') || 0));
-    return { items, degraded: [] };
-  } catch (e) {
-    return { items: [], degraded: [`Sanctions list unavailable (${e instanceof Error ? e.message : 'error'})`] };
-  }
-}
-
 /* ── entry point ─────────────────────────────────────────────── */
 
 export async function buildDailyBrief(days = 30, force = false): Promise<DailyBrief> {
@@ -232,23 +175,20 @@ export async function buildDailyBrief(days = 30, force = false): Promise<DailyBr
   // connects then time out and whole sections drop out of the brief.
   const ex = await collectExploits(days);
   const cve = await collectCves(days);
-  const sanc = await collectSanctionedWallets(days);
 
   const brief: DailyBrief = {
     generated_at: new Date().toISOString(),
     window_days: days,
     exploits: ex.items.slice(0, 40),
     cves: cve.items.slice(0, 40),
-    sanctioned_wallets: sanc.items.slice(0, 40),
     totals: {
       exploit_count: ex.items.length,
       exploit_losses_usd: ex.items.reduce((s, e) => s + (e.amount_usd || 0), 0),
       cve_count: cve.items.length,
       critical_cves: cve.items.filter(c => (c.cvss ?? 0) >= 9).length,
-      sanctioned_wallet_count: sanc.items.length,
     },
-    degraded: [...ex.degraded, ...cve.degraded, ...sanc.degraded],
-    sources: ['DefiLlama', 'NVD (NIST)', 'OpenSanctions / US OFAC SDN'],
+    degraded: [...ex.degraded, ...cve.degraded],
+    sources: ['DefiLlama', 'NVD (NIST)'],
   };
 
   cache = { at: Date.now(), days, brief };

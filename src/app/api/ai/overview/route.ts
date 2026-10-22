@@ -201,7 +201,7 @@ function headlineContext(reports: DigestReport[]): string {
 }
 
 /**
- * Chain-threat brief: exploits, crypto CVEs and OFAC wallet designations.
+ * Chain-threat brief: exploits and crypto CVEs.
  * Facts are stated with their figures so the heuristic path stays useful
  * when no Gemini key is configured.
  */
@@ -210,7 +210,6 @@ function digestChain(payload: any): Digest {
   const t = b.totals || {};
   const exploits: any[] = Array.isArray(b.exploits) ? b.exploits : [];
   const cves: any[] = Array.isArray(b.cves) ? b.cves : [];
-  const wallets: any[] = Array.isArray(b.sanctioned_wallets) ? b.sanctioned_wallets : [];
 
   const facts: string[] = [];
   const highlights: string[] = [];
@@ -245,13 +244,6 @@ function digestChain(payload: any): Digest {
       facts.push(`Highest severity: ${worst.id} at CVSS ${worst.cvss}.`);
       highlights.push(worst.id);
     }
-  }
-
-  if (wallets.length) {
-    const byAsset = new Map<string, number>();
-    for (const w of wallets) byAsset.set(w.asset, (byAsset.get(w.asset) || 0) + 1);
-    const spread = [...byAsset.entries()].map(([a, n]) => `${n} ${a}`).join(', ');
-    facts.push(`${t.sanctioned_wallet_count ?? wallets.length} OFAC-designated wallets in scope (${spread}).`);
   }
 
   const summaryLine = exploits.length

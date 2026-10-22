@@ -6,7 +6,6 @@
  * brain via GET /resolve.
  *
  * Data sources:
- *   - OpenSanctions (OFAC SDN) — bulk CSV, refreshed every 24h
  *   - Wikidata SPARQL — on-demand with aggressive LRU cache
  *
  * Security:
@@ -24,142 +23,12 @@ const PORT = process.env.INTEL_PORT || 4000;
 // §1 — CONFIGURATION
 // ════════════════════════════════════════════════════
 
-const SDN_CSV_URL = 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv';
 const WIKIDATA_ENDPOINT = 'https://query.wikidata.org/sparql';
 const WIKIDATA_UA = 'OSIRIS-Intel/1.0 (https://osirisai.live; ontology engine)';
-const SDN_REFRESH_MS = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_MAX = 10_000;
 
-const ALLOWED_DOMAINS = new Set(['query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org', 'ip-api.com', 'stat.ripe.net']);
-
-// ════════════════════════════════════════════════════
-// §2 — SANCTIONS INDEX (in-memory graph)
-// ════════════════════════════════════════════════════
-
-let sanctionsIndex = {
-  entries: [],
-  byNorm: new Map(),   // normalised name/alias → [entry]
-  fetchedAt: 0,
-};
-// The last refresh attempt, kept apart from the index so a refused refresh
-// shows up in /health instead of passing as a fresh load.
-let sanctionsRefresh = { attemptedAt: 0, error: null };
-
-function normName(s) {
-  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function parseCsv(text) {
-  const rows = [];
-  let field = '', row = [], inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
-      else field += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-/**
- * Builds a sanctions index from the OpenSanctions "simple" CSV, or throws when
- * the file is not one: a CDN error page, a truncated download or a changed
- * schema must not replace a working index with an empty one.
- */
-function buildSanctionsIndex(text, previousCount = 0) {
-  const rows = parseCsv(text);
-  if (rows.length < 2) throw new Error('CSV empty');
-
-  const headers = rows[0];
-  const idx = (col) => headers.indexOf(col);
-  const i = {
-    id: idx('id'), schema: idx('schema'), name: idx('name'),
-    aliases: idx('aliases'), countries: idx('countries'),
-    programs: idx('program_ids'), sanctions: idx('sanctions'),
-    first_seen: idx('first_seen'), last_seen: idx('last_seen'),
-  };
-  if (i.id < 0 || i.name < 0) throw new Error('CSV has no id/name columns');
-
-  const entries = [];
-  const byNorm = new Map();
-
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    if (!row[i.name]) continue;
-    const entry = {
-      id: row[i.id] || '',
-      schema: row[i.schema] || 'LegalEntity',
-      name: row[i.name],
-      aliases: (row[i.aliases] || '').split(';').map(s => s.trim()).filter(Boolean),
-      countries: (row[i.countries] || '').split(';').map(s => s.trim()).filter(Boolean),
-      programs: (row[i.programs] || '').split(';').map(s => s.trim()).filter(Boolean),
-      sanctions: row[i.sanctions] || '',
-      first_seen: i.first_seen >= 0 ? row[i.first_seen] : undefined,
-    };
-    entries.push(entry);
-
-    const keys = new Set([entry.name, ...entry.aliases].map(normName));
-    for (const key of keys) {
-      if (!key) continue;
-      if (!byNorm.has(key)) byNorm.set(key, []);
-      byNorm.get(key).push(entry);
-    }
-  }
-
-  if (entries.length === 0) throw new Error('CSV has no named entries');
-  // The SDN list grows and shrinks by a few entries; losing half of it at
-  // once is a broken file, not delistings.
-  if (entries.length < previousCount / 2) {
-    throw new Error(`CSV has ${entries.length} entries against ${previousCount} held`);
-  }
-  return { entries, byNorm, fetchedAt: Date.now() };
-}
-
-async function loadSanctions() {
-  console.log('[INTEL] Loading OpenSanctions OFAC SDN...');
-  sanctionsRefresh = { attemptedAt: Date.now(), error: null };
-  try {
-    const res = await fetch(SDN_CSV_URL, {
-      signal: AbortSignal.timeout(30000),
-      headers: { Accept: 'text/csv' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    sanctionsIndex = buildSanctionsIndex(await res.text(), sanctionsIndex.entries.length);
-    console.log(`[INTEL] Sanctions index loaded: ${sanctionsIndex.entries.length} entities, ${sanctionsIndex.byNorm.size} name keys`);
-  } catch (e) {
-    sanctionsRefresh.error = e.message;
-    console.error('[INTEL] Sanctions load failed:', e.message);
-    if (sanctionsIndex.entries.length > 0) {
-      console.log('[INTEL] Keeping the previous index');
-    }
-  }
-}
-
-function sanctionsSearch(query, limit = 5) {
-  if (!query || query.length < 3) return [];
-  const q = normName(query);
-  const exact = sanctionsIndex.byNorm.get(q) || [];
-  if (exact.length > 0) return exact.slice(0, limit);
-
-  const results = [];
-  const seen = new Set();
-  for (const entry of sanctionsIndex.entries) {
-    if (results.length >= limit) break;
-    if (seen.has(entry.id)) continue;
-    const n = normName(entry.name);
-    if (n.includes(q) || entry.aliases.some(a => normName(a).includes(q))) {
-      seen.add(entry.id);
-      results.push(entry);
-    }
-  }
-  return results;
-}
+const ALLOWED_DOMAINS = new Set(['query.wikidata.org', 'www.wikidata.org', 'ip-api.com', 'stat.ripe.net']);
 
 // ════════════════════════════════════════════════════
 // §3 — WIKIDATA LRU CACHE
@@ -254,23 +123,6 @@ async function wdSearch(query) {
 // ════════════════════════════════════════════════════
 // §5 — RESOLVERS (the intelligence)
 // ════════════════════════════════════════════════════
-
-function addSanctionsToGraph(query, rootId, nodes, links) {
-  const matches = sanctionsSearch(query);
-  for (const m of matches) {
-    const sid = `sanction:${m.id}`;
-    nodes.push({
-      id: sid, label: `⚠ ${m.name}`, type: 'sanction',
-      properties: {
-        schema: m.schema, countries: m.countries.join(', '),
-        programs: m.programs.join(', '), sanctions: m.sanctions,
-        aliases: m.aliases.slice(0, 5).join('; '),
-        first_seen: m.first_seen, sanctioned: true,
-      },
-    });
-    links.push({ source: rootId, target: sid, label: 'SANCTIONS MATCH' });
-  }
-}
 
 function dedup(nodes, links) {
   const seen = new Set();
@@ -375,11 +227,6 @@ async function resolveAircraft(id, properties = {}) {
     links.push({ source: rootId, target: mid, label: 'AIRCRAFT TYPE' });
   }
 
-  // Step 4: Cross-ref sanctions on airline name + callsign
-  addSanctionsToGraph(callsign, rootId, nodes, links);
-  if (airlineName) addSanctionsToGraph(airlineName, rootId, nodes, links);
-  if (registration) addSanctionsToGraph(registration, rootId, nodes, links);
-
   return finish(cacheKey, dedup(nodes, links), failed);
 }
 
@@ -430,8 +277,6 @@ async function resolveVessel(id) {
       }
     }
   } catch (e) { failed = true; console.warn('[INTEL] Wikidata vessel error:', e.message); }
-
-  addSanctionsToGraph(id, rootId, nodes, links);
   return finish(`vessel:${id}`, dedup(nodes, links), failed);
 }
 
@@ -475,8 +320,6 @@ async function resolveCompany(id) {
       }
     }
   } catch (e) { failed = true; console.warn('[INTEL] Wikidata company error:', e.message); }
-
-  addSanctionsToGraph(id, rootId, nodes, links);
   return finish(`company:${id}`, dedup(nodes, links), failed);
 }
 
@@ -518,8 +361,6 @@ async function resolvePerson(id) {
       }
     }
   } catch (e) { failed = true; console.warn('[INTEL] Wikidata person error:', e.message); }
-
-  addSanctionsToGraph(id, rootId, nodes, links);
   return finish(`person:${id}`, dedup(nodes, links), failed);
 }
 
@@ -545,7 +386,6 @@ async function resolveIP(id) {
           const ispId = `company:${data.isp}`;
           nodes.push({ id: ispId, label: data.isp, type: 'company', properties: { role: 'ISP', org: data.org || '', source: 'ip-api.com' } });
           links.push({ source: rootId, target: ispId, label: 'HOSTED_BY' });
-          addSanctionsToGraph(data.isp, rootId, nodes, links);
         }
 
         // ASN node
@@ -561,7 +401,6 @@ async function resolveIP(id) {
           const cid = `country:${data.country}`;
           nodes.push({ id: cid, label: data.country, type: 'country', properties: { code: data.countryCode || '', source: 'ip-api.com' } });
           links.push({ source: rootId, target: cid, label: 'LOCATED_IN' });
-          addSanctionsToGraph(data.country, rootId, nodes, links);
         }
 
         // City node (as event type with lat/lng)
@@ -734,8 +573,6 @@ async function resolveCountry(id) {
       }
     }
   } catch (e) { failed = true; console.warn('[INTEL] Wikidata country error:', e.message); }
-
-  addSanctionsToGraph(id, rootId, nodes, links);
   return finish(`country:${id}`, dedup(nodes, links), failed);
 }
 
@@ -762,15 +599,8 @@ function isRateLimited(ip, limit = 30, windowMs = 60000) {
 // ════════════════════════════════════════════════════
 
 app.get('/health', (_req, res) => {
-  // Still 200 while degraded: the process is up (the container healthcheck
-  // asks only that), and the body says what is wrong with the data.
-  const degraded = sanctionsIndex.entries.length === 0 || !!sanctionsRefresh.error;
   res.json({
-    status: degraded ? 'degraded' : 'ok',
-    sanctions_entries: sanctionsIndex.entries.length,
-    sanctions_loaded_at: sanctionsIndex.fetchedAt ? new Date(sanctionsIndex.fetchedAt).toISOString() : null,
-    sanctions_last_attempt_at: sanctionsRefresh.attemptedAt ? new Date(sanctionsRefresh.attemptedAt).toISOString() : null,
-    sanctions_last_error: sanctionsRefresh.error,
+    status: 'ok',
     wikidata_cache_size: wdCache.size,
     uptime_seconds: Math.floor(process.uptime()),
   });
@@ -811,7 +641,6 @@ app.get('/resolve', async (req, res) => {
       degraded: result.degraded,
       entity: { type, id },
       source: 'OSIRIS Intelligence Layer',
-      sanctions_index_size: sanctionsIndex.entries.length,
       wikidata_cache_hits: wdCache.size,
       timestamp: new Date().toISOString(),
     });
@@ -827,13 +656,8 @@ app.get('/resolve', async (req, res) => {
 
 async function boot() {
   console.log('[INTEL] OSIRIS Intelligence Layer starting...');
-  await loadSanctions();
-  // Refresh sanctions every 24h
-  setInterval(() => loadSanctions(), SDN_REFRESH_MS);
-
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[INTEL] Intelligence Layer ready on port ${PORT}`);
-    console.log(`[INTEL] Sanctions: ${sanctionsIndex.entries.length} entities indexed`);
     console.log(`[INTEL] Resolve endpoint: GET /resolve?type=<type>&id=<id>`);
   });
 }
@@ -842,4 +666,4 @@ if (require.main === module) {
   boot().catch(e => { console.error('[INTEL] Fatal:', e); process.exit(1); });
 }
 
-module.exports = { app, buildSanctionsIndex, loadSanctions, sanctionsSearch, normalizeId, sparqlString, RESOLVERS, wdCache };
+module.exports = { app, normalizeId, sparqlString, RESOLVERS, wdCache };
