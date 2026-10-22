@@ -234,7 +234,7 @@ export const API_GROUPS: ApiGroup[] = [
       {
         path: '/api/news',
         method: 'GET',
-        summary: 'Telegram OSINT posts with the declared lean of each channel, media, cross-posts and a per-source health report. risk_score is a keyword count, not a model output, and coords are preset country anchors.',
+        summary: 'Wire and newsroom RSS posts with the declared lean of each source, cross-posts and a per-source health report. risk_score is a keyword count, not a model output, and coords are preset country anchors.',
         returns: ['news', 'total', 'sources', 'timestamp'],
       },
       {

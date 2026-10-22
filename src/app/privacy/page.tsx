@@ -197,7 +197,7 @@ export default function PrivacyPage() {
               summary={<>
                 Camera pictures and streams come straight from whoever runs each camera (a road authority, a harbour, a
                 city) or from the video service it uses, such as YouTube, which may set its own cookies when a video plays.
-                A few alerts carry photos that load from Telegram when you open them, and the Live Clouds layer loads its
+                The Live Clouds layer loads its
                 imagery from NOAA while it is switched on. In each case the service sees an ordinary request from your
                 browser, as for any picture on the web.
               </>} />

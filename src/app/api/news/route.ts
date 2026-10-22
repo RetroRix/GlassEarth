@@ -1,18 +1,15 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { cachedSource } from '@/lib/sourceCache';
-import { fingerprint, htmlToText, parseChannelPage, splitHeadline, type TelegramPost } from '@/lib/telegram';
+import { fingerprint, htmlToText, splitHeadline, type NewsPost } from '@/lib/news-post';
 import type { Bloc } from '@/lib/alert-digest';
 import { alertKind, budgetedLookup, locateReport, type AlertKind, type AlertPlace } from '@/lib/alert-places';
 
 /**
- * OSIRIS — Live Alerts news feed.
+ * Glass Earth — Live Alerts news feed.
  *
- * Reads two kinds of source into one feed: public Telegram OSINT channels,
- * which are fast and carry footage, and wire services, which cover the ground
- * the channels ignore and keep publishing if Telegram blocks the host. Both
- * are read and merged the same way, so a story carried by several of them
- * folds into one report that names them all.
+ * Reads wire services and national newsrooms over RSS into one feed. A story
+ * carried by several of them folds into one report that names them all.
  *
  * Each source is cached on its own for a few minutes, so a busy dashboard
  * costs an upstream one request per window however many tabs are open, and a
@@ -20,50 +17,18 @@ import { alertKind, budgetedLookup, locateReport, type AlertKind, type AlertPlac
  * emptying the feed.
  */
 
-// Public Telegram OSINT channels, picked for what they report rather than what
-// they argue. Measured over 72 hours of live posts, each one carries more
-// events — strikes, impacts, intercepts, damage, movements — than commentary,
-// and the roster spans the spectrum so no single narrative owns the feed.
-// `lean` and `bloc` travel with every item to the UI: a partisan field report
-// is still a partisan source, and is labelled as one.
-//
-// Dropped 2026-09-18 for talking more than they report (event share over
-// quote share, same window): Middle East Spectator 12/41, NEXTA Live 15/45
-// (and 1% English), Bellum Acta 25/44 (also runs advertising in its footer).
-// Earlier: OSINTtechnical (silent since June 2022), Clash Report and Liveuamap.
 interface Feed { handle: string; name: string; lean: string; bloc: Bloc }
 
-const TELEGRAM_CHANNELS: Feed[] = [
-  // Incident feeds: what happened, where, with footage. Least commentary of any source measured.
-  { handle: 'Osintdefender',         name: 'OSINTdefender',         lean: 'Global incident OSINT',         bloc: 'independent' },
-  { handle: 'WarMonitors',           name: 'War Monitor',           lean: 'Global conflict monitor',       bloc: 'independent' },
-  // Russia–Ukraine, reported from both sides of the line.
-  { handle: 'rybar_in_english',      name: 'Rybar',                 lean: 'Russian military OSINT',        bloc: 'russian' },
-  { handle: 'DDGeopolitics',         name: 'DD Geopolitics',        lean: 'Multipolar / Russian',          bloc: 'russian' },
-  { handle: 'KyivIndependent_official', name: 'Kyiv Independent',   lean: 'Ukrainian newsroom',            bloc: 'western' },
-  // Gaza, the West Bank and south Lebanon, from newsrooms on the ground.
-  { handle: 'QudsNen',               name: 'Quds News Network',     lean: 'Palestinian / Gaza & West Bank', bloc: 'regional' },
-  { handle: 'AlMayadeenEnglish',     name: 'Al Mayadeen English',   lean: 'Lebanese / Resistance Axis',    bloc: 'regional' },
-  // Added 2026-09-20 after measuring the same 72-hour window: both report
-  // events in English more often than they comment on them.
-  { handle: 'intelslava',            name: 'Intel Slava Z',         lean: 'Russian military OSINT',        bloc: 'russian' },
-  { handle: 'PressTV',               name: 'Press TV',              lean: 'Iranian state broadcaster',     bloc: 'regional' },
-];
-type Channel = Feed;
-
 /*
- * Wire services and national newsrooms. The channels above are fast and carry
- * footage, but they follow a handful of wars: nothing in the roster reports
- * Africa, South and East Asia, or Latin America unless a war reaches them, and
- * if Telegram blocks the host the feed goes dark. These cover that ground,
- * publish on a schedule, and are labelled for who runs them — a state
- * broadcaster is a state broadcaster whatever it is reporting.
+ * Wire services and national newsrooms, labelled for who runs them — a state
+ * broadcaster is a state broadcaster whatever it is reporting. `lean` and
+ * `bloc` travel with every item to the UI: a partisan field report is still a
+ * partisan source, and is labelled as one.
  *
  * Checked 2026-09-20: each answers, carries at least ten items, and its newest
  * item was under an hour old. Left out because they do not: Reuters (feed
  * retired), AP and Al Arabiya (403 to any reader), Xinhua and NHK (404),
- * France 24 (empty), Kyiv Independent (404 — its Telegram channel is above),
- * Jerusalem Post (items dated 2025).
+ * France 24 (empty), Jerusalem Post (items dated 2025).
  */
 const WIRE_FEEDS: (Feed & { url: string })[] = [
   { handle: 'bbc',        url: 'https://feeds.bbci.co.uk/news/world/rss.xml',        name: 'BBC World',        lean: 'British public broadcaster',   bloc: 'western' },
@@ -77,12 +42,11 @@ const WIRE_FEEDS: (Feed & { url: string })[] = [
   { handle: 'africanews', url: 'https://www.africanews.com/feed/rss',                name: 'Africanews',       lean: 'Pan-African newsroom',         bloc: 'regional' },
 ];
 
-const POSTS_PER_CHANNEL = 8;
-/** A wire publishes far more than a channel, so it contributes fewer items. */
+const POSTS_PER_SOURCE = 8;
+/** A wire publishes far more than the feed shows, so each contributes fewer items. */
 const ITEMS_PER_WIRE = 5;
-const CHANNEL_TTL_MS = 3 * 60_000;
 const WIRE_TTL_MS = 5 * 60_000;
-/** A live feed shows live posts: anything older is left out, however quiet the channel. */
+/** A live feed shows live posts: anything older is left out, however quiet the source. */
 export const MAX_POST_AGE_MS = 72 * 3_600_000;
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -134,22 +98,23 @@ export function findCoords(text: string): { coords: [number, number]; anchor: st
   return null;
 }
 
-/** The newest posts inside the live window, newest last as Telegram orders them. */
-export function recentPosts(posts: TelegramPost[], now = Date.now()): TelegramPost[] {
+/** The newest posts inside the live window, newest last as the source lists them. */
+export function recentPosts(posts: NewsPost[], now = Date.now()): NewsPost[] {
   return posts
     .filter(p => now - Date.parse(p.publishedAt) <= MAX_POST_AGE_MS)
-    .slice(-POSTS_PER_CHANNEL);
+    .slice(-POSTS_PER_SOURCE);
 }
 
-export interface ChannelPost { post: TelegramPost; channel: Pick<Channel, 'handle' | 'name' | 'lean' | 'bloc'> }
+export interface FeedPost { post: NewsPost; source: Feed & { url: string } }
 
 /**
- * Folds the same report posted by several channels into one story: the
- * earliest post leads and the others are listed as carrying it. Forwards are
- * the common case, so this records who carried a story, not who confirmed it.
+ * Folds the same report carried by several sources into one story: the
+ * earliest post leads and the others are listed as carrying it. Cross-posts
+ * are the common case, so this records who carried a story, not who
+ * confirmed it.
  */
-export function mergeCrossPosts(posts: ChannelPost[]): { lead: ChannelPost; carriedBy: ChannelPost[] }[] {
-  const byKey = new Map<string, ChannelPost[]>();
+export function mergeCrossPosts(posts: FeedPost[]): { lead: FeedPost; carriedBy: FeedPost[] }[] {
+  const byKey = new Map<string, FeedPost[]>();
   for (const p of posts) {
     const fp = fingerprint(p.post.text);
     // Too short to tell two different posts apart ("Video", "Map update").
@@ -158,37 +123,24 @@ export function mergeCrossPosts(posts: ChannelPost[]): { lead: ChannelPost; carr
   }
   return [...byKey.values()].map(group => {
     const [lead, ...rest] = [...group].sort((a, b) => Date.parse(a.post.publishedAt) - Date.parse(b.post.publishedAt));
-    // A channel reposting itself is not a second channel carrying the story.
-    const seen = new Set([lead.channel.handle]);
+    // A source reposting itself is not a second source carrying the story.
+    const seen = new Set([lead.source.handle]);
     const carriedBy = rest.filter(c => {
-      if (seen.has(c.channel.handle)) return false;
-      seen.add(c.channel.handle);
+      if (seen.has(c.source.handle)) return false;
+      seen.add(c.source.handle);
       return true;
     });
     return { lead, carriedBy };
   });
 }
 
-const channelFeeds = TELEGRAM_CHANNELS.map(channel => ({
-  channel,
-  load: cachedSource<TelegramPost>(`telegram:${channel.handle}`, async () => {
-    const res = await fetch(`https://t.me/s/${channel.handle}`, {
-      signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': BROWSER_UA },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    // Cached whole; the age window is applied per request, as posts age in the cache.
-    return parseChannelPage(await res.text(), channel.handle);
-  }, CHANNEL_TTL_MS),
-}));
-
 /**
  * A wire item in the shape the rest of the route already speaks, so a story
  * from BBC and the same story from Al Jazeera fold together exactly as two
- * channels carrying one report do, and every consumer downstream — the cards,
+ * sources carrying one report do, and every consumer downstream — the cards,
  * the threads, the place lookup — needs no branch for where an item came from.
  */
-export function wirePost(item: RssItem, feed: Feed): TelegramPost {
+export function wirePost(item: RssItem, feed: Feed): NewsPost {
   const text = item.description && item.description !== item.title
     ? `${item.title}\n\n${item.description}`
     : item.title;
@@ -211,15 +163,15 @@ export function wirePost(item: RssItem, feed: Feed): TelegramPost {
 }
 
 const wireFeeds = WIRE_FEEDS.map(feed => ({
-  channel: feed,
-  load: cachedSource<TelegramPost>(`wire:${feed.handle}`, async () => {
+  source: feed,
+  load: cachedSource<NewsPost>(`wire:${feed.handle}`, async () => {
     const res = await fetch(feed.url, {
       signal: AbortSignal.timeout(8000),
       headers: { 'User-Agent': BROWSER_UA, Accept: 'application/rss+xml, application/xml;q=0.9, */*;q=0.8' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const items = parseRSSItems(await res.text(), feed.name).slice(0, ITEMS_PER_WIRE);
-    // Oldest first, as a channel page arrives, so recentPosts takes the newest.
+    // Oldest first, as a source page arrives, so recentPosts takes the newest.
     return items
       .map(item => wirePost(item, feed))
       .sort((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt));
@@ -242,7 +194,7 @@ function parseRSSItems(xml: string, sourceName: string): RssItem[] {
 
     const title = htmlToText(getTag('title'));
     const pubDate = getTag('pubDate');
-    // Same rule as Telegram: no timestamp, no item — never back-dated to "now".
+    // Same rule for every source: no timestamp, no item — never back-dated to "now".
     if (!title || !pubDate || Number.isNaN(Date.parse(pubDate))) continue;
 
     items.push({
@@ -279,14 +231,12 @@ function assess(text: string) {
 
 const hashId = (s: string) => crypto.createHash('md5').update(s).digest('hex');
 
-/** How an item names where it came from: the channel, or the wire's own site. */
-export function sourceRef(channel: Channel): string {
-  const wire = WIRE_FEEDS.find(f => f.handle === channel.handle);
-  if (!wire) return `t.me/${channel.handle}`;
+/** How an item names where it came from: the wire's own site. */
+export function sourceRef(feed: Feed & { url: string }): string {
   try {
-    return new URL(wire.url).hostname.replace(/^www\./, '');
+    return new URL(feed.url).hostname.replace(/^www\./, '');
   } catch {
-    return channel.handle;
+    return feed.handle;
   }
 }
 
@@ -303,9 +253,9 @@ type NewsItem = {
   source_name: string;
   lean: string | null;
   bloc: Bloc | null;
-  flag: TelegramPost['flag'];
-  media: TelegramPost['media'];
-  forwarded_from: TelegramPost['forwardedFrom'];
+  flag: NewsPost['flag'];
+  media: NewsPost['media'];
+  forwarded_from: NewsPost['forwardedFrom'];
   reply_to: string | null;
   views: number | null;
   also_reported_by: Carrier[];
@@ -374,7 +324,7 @@ interface SourceHealth {
   name: string;
   lean: string;
   bloc: Bloc;
-  kind: 'telegram' | 'wire';
+  kind: 'wire';
   count: number;
   latest: string | null;
 }
@@ -389,50 +339,49 @@ interface FeedPayload {
 async function buildFeed(): Promise<FeedPayload> {
   {
     const now = Date.now();
-    /* Channels and wires are read the same way and fail the same way: one
-       source that is slow or blocked costs its own items, not the feed. */
-    const loaded = await Promise.all([...channelFeeds, ...wireFeeds].map(async f => {
-      const all = await f.load().catch(() => [] as TelegramPost[]);
-      return { channel: f.channel, all, posts: recentPosts(all, now) };
+    /* Sources are read the same way and fail the same way: one source that
+       is slow or blocked costs its own items, not the feed. */
+    const loaded = await Promise.all(wireFeeds.map(async f => {
+      const all = await f.load().catch(() => [] as NewsPost[]);
+      return { source: f.source, all, posts: recentPosts(all, now) };
     }));
 
-    const wireHandles = new Set(WIRE_FEEDS.map(f => f.handle));
-    const sources = loaded.map(({ channel, all, posts }) => ({
-      handle: channel.handle,
-      name: channel.name,
-      lean: channel.lean,
-      bloc: channel.bloc,
+    const sources = loaded.map(({ source, all, posts }) => ({
+      handle: source.handle,
+      name: source.name,
+      lean: source.lean,
+      bloc: source.bloc,
       /** Where it was read from, so the panel can say what kind of source it is. */
-      kind: wireHandles.has(channel.handle) ? 'wire' as const : 'telegram' as const,
+      kind: 'wire' as const,
       /** Posts inside the live window. */
       count: posts.length,
-      /** The channel's newest post, even when it is older than the window. */
+      /** The source's newest post, even when it is older than the window. */
       latest: all.length ? all[all.length - 1].publishedAt : null,
     }));
 
-    const stories = mergeCrossPosts(loaded.flatMap(({ channel, posts }) => posts.map(post => ({ post, channel }))));
+    const stories = mergeCrossPosts(loaded.flatMap(({ source, posts }) => posts.map(post => ({ post, source }))));
 
-    const newsItems: NewsItem[] = stories.map(({ lead: { post, channel }, carriedBy }) => ({
+    const newsItems: NewsItem[] = stories.map(({ lead: { post, source }, carriedBy }) => ({
       id: hashId(post.url),
       title: post.headline,
       summary: post.summary,
       description: post.text,
       link: post.url,
       published: post.publishedAt,
-      source: sourceRef(channel),
-      source_name: channel.name,
-      lean: channel.lean,
-      bloc: channel.bloc,
+      source: sourceRef(source),
+      source_name: source.name,
+      lean: source.lean,
+      bloc: source.bloc,
       flag: post.flag,
       media: post.media,
       forwarded_from: post.forwardedFrom,
       reply_to: post.replyTo,
       views: post.views,
       also_reported_by: carriedBy.map(c => ({
-        source: sourceRef(c.channel),
-        source_name: c.channel.name,
-        lean: c.channel.lean,
-        bloc: c.channel.bloc,
+        source: sourceRef(c.source),
+        source_name: c.source.name,
+        lean: c.source.lean,
+        bloc: c.source.bloc,
         link: c.post.url,
         published: c.post.publishedAt,
       })),

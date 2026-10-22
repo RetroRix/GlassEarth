@@ -412,10 +412,6 @@ docker compose up -d`}</Pre>
                   v: 'Shared secret for /api/sdk/ingest. The endpoint fails closed: while this is unset, ingestion is disabled and returns 503.',
                 },
                 {
-                  k: 'OSIRIS_TELEGRAM_CHANNELS',
-                  v: 'Comma-separated public Telegram channel names (no @) for the Telegram OSINT layer, overriding the curated default set.',
-                },
-                {
                   k: 'OSIRIS_PORT',
                   v: 'Host port the UI is published on. The container itself always listens on 3000.',
                 },

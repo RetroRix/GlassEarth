@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { scoreRisk, findCoords, mergeCrossPosts, recentPosts, wirePost, sourceRef, type ChannelPost, type RssItem } from './route';
-import type { TelegramPost } from '@/lib/telegram';
+import { scoreRisk, findCoords, mergeCrossPosts, recentPosts, wirePost, sourceRef, type FeedPost, type RssItem } from './route';
+import type { NewsPost } from '@/lib/news-post';
 
 describe('scoreRisk', () => {
   it('reports the terms that produced the score', () => {
@@ -52,17 +52,17 @@ describe('findCoords', () => {
   });
 });
 
-const channel = (handle: string, bloc: 'western' | 'russian' = 'western') => ({ handle, name: handle, lean: 'x', bloc });
-const post = (id: string, text: string, publishedAt: string): TelegramPost => ({
-  id, channel: id.split('/')[0], url: `https://t.me/${id}`, publishedAt, text,
+const source = (handle: string, bloc: 'western' | 'russian' = 'western') => ({ handle, name: handle, lean: 'x', bloc, url: `https://feeds.example.com/${handle}` });
+const post = (id: string, text: string, publishedAt: string): NewsPost => ({
+  id, channel: id.split('/')[0], url: `https://example.com/${id}`, publishedAt, text,
   headline: text, flag: null, summary: '', media: null, forwardedFrom: null, replyTo: null, views: null,
 });
 
 describe('recentPosts', () => {
   const now = Date.parse('2026-09-17T12:00:00Z');
 
-  /* A dead channel's page still lists its last posts. OSINTtechnical's were
-     from June 2022 and went out as live alerts. */
+  /* A dead source's archive still lists its last posts, and they must not
+     go out as live alerts. */
   it('leaves out posts older than the live window', () => {
     const posts = [
       post('a/1', 'Old post from a channel that stopped posting', '2022-06-27T16:30:37Z'),
@@ -72,7 +72,7 @@ describe('recentPosts', () => {
     expect(recentPosts(posts, now).map(p => p.id)).toEqual(['a/2', 'a/3']);
   });
 
-  it('keeps only the newest posts per channel', () => {
+  it('keeps only the newest posts per source', () => {
     const posts = Array.from({ length: 12 }, (_, i) => post(`a/${i}`, `Post ${i}`, new Date(now - (12 - i) * 60_000).toISOString()));
     const kept = recentPosts(posts, now);
     expect(kept).toHaveLength(8);
@@ -83,11 +83,11 @@ describe('recentPosts', () => {
 describe('mergeCrossPosts', () => {
   const report = 'Explosions reported near the Kherson rail junction after an overnight drone attack';
 
-  it('folds one report posted by several channels into a single story led by the earliest', () => {
-    const posts: ChannelPost[] = [
-      { post: post('b/7', `🇺🇦 ${report} https://t.me/b`, '2026-09-17T10:05:00Z'), channel: channel('b', 'russian') },
-      { post: post('a/3', report, '2026-09-17T10:00:00Z'), channel: channel('a') },
-      { post: post('c/9', 'An unrelated report about a naval exercise in the Baltic Sea today', '2026-09-17T10:01:00Z'), channel: channel('c') },
+  it('folds one report carried by several sources into a single story led by the earliest', () => {
+    const posts: FeedPost[] = [
+      { post: post('b/7', `🇺🇦 ${report} https://example.com/b`, '2026-09-17T10:05:00Z'), source: source('b', 'russian') },
+      { post: post('a/3', report, '2026-09-17T10:00:00Z'), source: source('a') },
+      { post: post('c/9', 'An unrelated report about a naval exercise in the Baltic Sea today', '2026-09-17T10:01:00Z'), source: source('c') },
     ];
     const stories = mergeCrossPosts(posts);
     expect(stories).toHaveLength(2);
@@ -96,10 +96,10 @@ describe('mergeCrossPosts', () => {
     expect(merged.carriedBy.map(c => c.post.id)).toEqual(['b/7']);
   });
 
-  it('does not count a channel repeating its own post as a second channel', () => {
+  it('does not count a source repeating its own post as a second source', () => {
     const stories = mergeCrossPosts([
-      { post: post('a/1', report, '2026-09-17T10:00:00Z'), channel: channel('a') },
-      { post: post('a/2', report, '2026-09-17T11:00:00Z'), channel: channel('a') },
+      { post: post('a/1', report, '2026-09-17T10:00:00Z'), source: source('a') },
+      { post: post('a/2', report, '2026-09-17T11:00:00Z'), source: source('a') },
     ]);
     expect(stories).toHaveLength(1);
     expect(stories[0].carriedBy).toEqual([]);
@@ -107,8 +107,8 @@ describe('mergeCrossPosts', () => {
 
   it('never merges short posts, which are too generic to match reliably', () => {
     const stories = mergeCrossPosts([
-      { post: post('a/1', 'Map update', '2026-09-17T10:00:00Z'), channel: channel('a') },
-      { post: post('b/1', 'Map update', '2026-09-17T10:00:00Z'), channel: channel('b') },
+      { post: post('a/1', 'Map update', '2026-09-17T10:00:00Z'), source: source('a') },
+      { post: post('b/1', 'Map update', '2026-09-17T10:00:00Z'), source: source('b') },
     ]);
     expect(stories).toHaveLength(2);
   });
@@ -124,7 +124,7 @@ describe('wirePost', () => {
     source: 'BBC World',
   };
 
-  it('reads a wire item into the shape a channel post has', () => {
+  it('reads a wire item into the shared feed shape', () => {
     const post = wirePost(item, feed);
     expect(post.channel).toBe('bbc');
     expect(post.url).toBe(item.link);
@@ -135,7 +135,7 @@ describe('wirePost', () => {
     expect(post.media).toBeNull();
   });
 
-  it('lifts a breaking label the same way a channel post does', () => {
+  it('lifts a breaking label the same way any source item does', () => {
     const post = wirePost({ ...item, title: 'BREAKING: Strikes reported in southern Lebanon' }, feed);
     expect(post.flag).toBe('BREAKING');
     expect(post.headline).toBe('Strikes reported in southern Lebanon');
@@ -154,9 +154,8 @@ describe('wirePost', () => {
 });
 
 describe('sourceRef', () => {
-  it('names a channel by its handle and a wire by its site', () => {
-    expect(sourceRef({ handle: 'QudsNen', name: 'Quds News Network', lean: '', bloc: 'regional' })).toBe('t.me/QudsNen');
-    expect(sourceRef({ handle: 'bbc', name: 'BBC World', lean: '', bloc: 'western' })).toBe('feeds.bbci.co.uk');
-    expect(sourceRef({ handle: 'tass', name: 'TASS', lean: '', bloc: 'russian' })).toBe('tass.com');
+  it('names a wire by its site', () => {
+    expect(sourceRef({ handle: 'bbc', name: 'BBC World', lean: '', bloc: 'western', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' })).toBe('feeds.bbci.co.uk');
+    expect(sourceRef({ handle: 'tass', name: 'TASS', lean: '', bloc: 'russian', url: 'https://tass.com/rss/v2.xml' })).toBe('tass.com');
   });
 });

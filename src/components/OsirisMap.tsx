@@ -1757,14 +1757,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const link = urlSafe(p.link);
       const video = urlSafe(p.video);
       const thumb = urlSafe(p.thumb);
-      /* Footage plays in place where Telegram serves the file; a video it
-         only shows in the app gets its preview and a way through to it. */
+      /* Footage plays in place where the source serves the file; a video it
+         only shows on its own site gets its preview and a way through to it. */
       const media = video !== '#'
         ? `<video src="${video}"${thumb !== '#' ? ` poster="${thumb}"` : ''} controls playsinline preload="none" style="display:block;width:100%;max-height:180px;margin-top:10px;border-radius:6px;background:#000;"></video>`
         : thumb !== '#'
           ? `<a href="${link}" target="_blank" rel="noopener noreferrer" style="display:block;position:relative;margin-top:10px;">
               <img src="${thumb}" referrerpolicy="no-referrer" alt="" style="display:block;width:100%;max-height:180px;object-fit:cover;border-radius:6px;">
-              ${p.media_kind === 'video' ? `<span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.75);color:#fff;font-size:9px;letter-spacing:0.1em;padding:4px 10px;border-radius:12px;">▶ WATCH ON TELEGRAM${p.duration ? ` · ${htmlEsc(p.duration)}` : ''}</span>` : ''}
+              ${p.media_kind === 'video' ? `<span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.75);color:#fff;font-size:9px;letter-spacing:0.1em;padding:4px 10px;border-radius:12px;">▶ WATCH${p.duration ? ` · ${htmlEsc(p.duration)}` : ''}</span>` : ''}
             </a>`
           : '';
       const more = rest.slice(0, 4).map(r => {

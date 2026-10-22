@@ -12,7 +12,7 @@ import {
   ALERT_KINDS, BLOCS, BLOC_ORDER, buildThreads, groupStatements, timeAgo, type AlertKind, type Bloc, type DigestReport,
 } from '@/lib/alert-digest';
 
-interface SourceHealth { handle: string; name: string; lean: string; bloc: Bloc; kind?: 'telegram' | 'wire'; count: number; latest: string | null }
+interface SourceHealth { handle: string; name: string; lean: string; bloc: Bloc; kind?: 'wire'; count: number; latest: string | null }
 
 /** The slice of dashboard state this panel reads. */
 interface LiveAlertsData {
@@ -426,7 +426,7 @@ function NewsCard({ item, now, open, wide, onToggle, onLocate }: {
               {item.media.kind === 'video' && (
                 <span className="absolute inset-0 flex items-center justify-center bg-black/25">
                   <span className="flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-mono text-white">
-                    <Play className="w-3 h-3" /> WATCH ON TELEGRAM{item.media.duration ? ` · ${item.media.duration}` : ''}
+                    <Play className="w-3 h-3" /> WATCH{item.media.duration ? ` · ${item.media.duration}` : ''}
                   </span>
                 </span>
               )}
@@ -568,7 +568,7 @@ function StatementCard({ speaker, items, now, open, wide, onToggle }: {
               {item.media && (item.media.kind === 'video' ? <Play className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />)}
               {timeAgo(item.ts, now).replace(' ago', '')}
               {item.link && (
-                <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-[var(--cyan-primary)] hover:opacity-70" aria-label="Open this statement on Telegram">
+                <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-[var(--cyan-primary)] hover:opacity-70" aria-label="Open this statement at its source">
                   <ExternalLink className="w-2.5 h-2.5" />
                 </a>
               )}
@@ -868,14 +868,13 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed, onRefresh, pin
     { id: 'feeds', label: 'FEEDS', count: BUILTIN_FEEDS.length },
   ];
 
-  /* Grouped by where each source is read from, since a channel going quiet
-     and a wire going quiet mean different things. */
+  /* All sources are wires now; the heading names the group for the tooltip. */
   const sourcesTitle = sources.length
-    ? (['telegram', 'wire'] as const)
+    ? (['wire'] as const)
       .map(kind => {
-        const group = sources.filter(s => (s.kind ?? 'telegram') === kind);
+        const group = sources.filter(s => (s.kind ?? 'wire') === kind);
         if (!group.length) return '';
-        const heading = kind === 'telegram' ? 'CHANNELS' : 'WIRES';
+        const heading = 'WIRES';
         const lines = group.map(s => `  ${s.name}: ${s.count ? `${s.count} items, latest ${timeAgo(s.latest, now)}` : s.latest ? `quiet — nothing in 72h (last ${timeAgo(s.latest, now)})` : 'unreachable'}`);
         return `${heading}\n${lines.join('\n')}`;
       })
