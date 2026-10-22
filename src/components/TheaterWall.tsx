@@ -61,7 +61,6 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
   const [picker, setPicker] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [isFs, setIsFs] = useState(false);
-  const filledOnce = useRef(false);
 
   const count = layout * layout;
 
@@ -87,7 +86,7 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
   }, [catalog, favoriteSet]);
   const pool = pools[poolMode];
   const poolRef = useRef(pool);
-  poolRef.current = pool;
+  useEffect(() => { poolRef.current = pool; }, [pool]);
 
   /** Fill every slot from a pool, in pool order, wrapping if it runs short. */
   const fill = (from: WallCamera[], size: number) => {
@@ -95,36 +94,27 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
     setSlots(rotateWindow(from, size, 0).map(cameraKey));
   };
 
-  /* First fill: only once, only when nothing was restored, and from the
-     Texas preset — falling back to the world when TxDOT has not landed yet
-     is wrong (it streams in seconds later), so wait for it specifically
-     unless the whole catalogue is in and Texas truly has nothing playable. */
-  useEffect(() => {
-    if (filledOnce.current) return;
-    if (slots.some(s => s !== null)) { filledOnce.current = true; return; }
-    if (pools.texas.length) {
-      filledOnce.current = true;
-      fill(pools.texas, count);
+  /* The slots as rendered: what the operator stored, completed to grid size
+     from the current pool. Stored slots change only through operator action
+     (picking a camera, choosing a preset, rotation), so the first fill and
+     any size mismatch resolve here, derivatively: a fresh wall fills from
+     the Texas preset as soon as TxDOT cameras land, and a restored wall
+     keeps its picks exactly. */
+  const viewSlots = useMemo(() => {
+    const base = slots.slice(0, count);
+    if (base.length >= count) return base;
+    const used = new Set(base.filter((s): s is string => s !== null));
+    const next = [...base];
+    for (const cam of pool) {
+      if (next.length >= count) break;
+      const key = cameraKey(cam);
+      if (!used.has(key)) { next.push(key); used.add(key); }
     }
-  }, [pools.texas, slots, count]);
+    while (next.length < count) next.push(null);
+    return next;
+  }, [slots, count, pool]);
 
-  /* Keep the slot array the size of the grid, preserving picks. */
-  useEffect(() => {
-    setSlots(prev => {
-      if (prev.length === count) return prev;
-      const next = prev.slice(0, count);
-      const used = new Set(next.filter(Boolean));
-      for (const cam of poolRef.current) {
-        if (next.length >= count) break;
-        const key = cameraKey(cam);
-        if (!used.has(key)) { next.push(key); used.add(key); }
-      }
-      while (next.length < count) next.push(null);
-      return next;
-    });
-  }, [count]);
-
-  useEffect(() => { saveAssignments(slots); }, [slots]);
+  useEffect(() => { saveAssignments(viewSlots); }, [viewSlots]);
   useEffect(() => { saveFavorites(favorites); }, [favorites]);
 
   /* Rotation pages the whole wall through the current pool. It only makes
@@ -184,7 +174,7 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
   const playingVideo = useMemo(() => {
     const allowed = new Set<number>();
     let videos = 0;
-    slots.forEach((id, i) => {
+    viewSlots.forEach((id, i) => {
       const cam = id ? byId.get(id) : undefined;
       if (cam && isVideoWallCamera(cam)) {
         if (videos < MAX_PLAYING_VIDEO_TILES) allowed.add(i);
@@ -192,7 +182,7 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
       }
     });
     return allowed;
-  }, [slots, byId]);
+  }, [viewSlots, byId]);
 
   const pickerList = useMemo(() => {
     if (picker === null) return [];
@@ -208,7 +198,7 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
   const btnActive = 'border-[var(--gold-primary)]/60 bg-[var(--gold-primary)]/15 text-[var(--gold-primary)]';
 
   const renderTile = (slotIndex: number, big: boolean) => {
-    const id = slots[slotIndex];
+    const id = viewSlots[slotIndex];
     const cam = id ? byId.get(id) : undefined;
     const isFav = id ? favoriteSet.has(id) : false;
     return (
@@ -379,7 +369,7 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
                     <button
                       className="min-w-0 flex-1 text-left"
                       onClick={() => {
-                        setSlots(prev => prev.map((s, i) => (i === picker ? key : s)));
+                        setSlots(viewSlots.map((s, i) => (i === picker ? key : s)));
                         setRotating(false);
                         setPicker(null);
                       }}

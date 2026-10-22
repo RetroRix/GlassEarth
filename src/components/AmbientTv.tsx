@@ -33,12 +33,10 @@ interface AmbientTvProps {
 export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [catalog, setCatalog] = useState<WallCamera[]>(cameras);
-  const [current, setCurrent] = useState<WallCamera | null>(null);
+  const [index, setIndex] = useState(0);
   const [visible, setVisible] = useState(true);
   const [overlay, setOverlay] = useState(true);
-  const [clock, setClock] = useState('');
-  const [dateLine, setDateLine] = useState('');
-  const indexRef = useRef(0);
+  const [now, setNow] = useState(() => new Date());
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* Same self-sufficiency as the wall: top the catalogue up directly. */
@@ -49,41 +47,30 @@ export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
     );
   }, []);
 
+  /* The current place is derived from the pool, never stored: the pool grows
+     as the catalogue streams in, and the index simply rides along. */
   const pool = scenicPool(catalog);
-  const poolRef = useRef(pool);
-  poolRef.current = pool;
-
-  /* First camera as soon as the pool has anything in it. */
-  useEffect(() => {
-    if (!current && pool.length) setCurrent(pool[0]);
-  }, [pool, current]);
+  const current = pool.length ? pool[index % pool.length] : null;
+  const clock = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateLine = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 
   /* The rotation: fade to black, swap, fade back. One camera at a time means
      one decoder, which is the whole point of the mode. */
   useEffect(() => {
-    if (!current) return;
+    if (pool.length < 2) return;
     const iv = setInterval(() => {
-      const list = poolRef.current;
-      if (list.length < 2) return;
       setVisible(false);
       setTimeout(() => {
-        indexRef.current = (indexRef.current + 1) % list.length;
-        setCurrent(list[indexRef.current]);
+        setIndex(i => (i + 1) % pool.length);
         setVisible(true);
       }, FADE_MS);
     }, DWELL_MS);
     return () => clearInterval(iv);
-  }, [current]);
+  }, [pool]);
 
   /* Clock, ticking quietly in the corner. */
   useEffect(() => {
-    const update = () => {
-      const now = new Date();
-      setClock(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      setDateLine(now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }));
-    };
-    update();
-    const iv = setInterval(update, 1000);
+    const iv = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(iv);
   }, []);
 
@@ -111,10 +98,10 @@ export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
     if (idleTimer.current) clearTimeout(idleTimer.current);
     idleTimer.current = setTimeout(() => setOverlay(false), OVERLAY_IDLE_MS);
   };
+  /* The overlay starts awake; this only arms its first fade. */
   useEffect(() => {
-    wakeOverlay();
+    idleTimer.current = setTimeout(() => setOverlay(false), OVERLAY_IDLE_MS);
     return () => { if (idleTimer.current) clearTimeout(idleTimer.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (typeof document === 'undefined') return null;

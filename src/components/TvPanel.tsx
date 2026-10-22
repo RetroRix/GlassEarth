@@ -57,14 +57,16 @@ function watchUrl(feed: TvFeed): string {
 
 export default function TvPanel({ feeds: feedsProp, services: servicesProp, onClose }: TvPanelProps) {
   const [local, setLocal] = useState<{ feeds: TvFeed[]; services: FastService[] } | null>(null);
-  const feeds = feedsProp.length ? feedsProp : local?.feeds ?? [];
-  const services = servicesProp.length ? servicesProp : local?.services ?? [];
+  const feeds = useMemo(() => (feedsProp.length ? feedsProp : local?.feeds ?? []), [feedsProp, local]);
+  const services = useMemo(() => (servicesProp.length ? servicesProp : local?.services ?? []), [servicesProp, local]);
 
   const [mode, setMode] = useState<'single' | 'multi'>('single');
   const [selected, setSelected] = useState<string | null>(null);
   const [multi, setMulti] = useState<string[]>([]);
   const [dead, setDead] = useState<ReadonlySet<string>>(new Set());
-  const [pipSupported, setPipSupported] = useState(false);
+  /* The panel only ever mounts in the browser, on a click — window is safe
+     to ask in the initializer. */
+  const [pipSupported] = useState(() => typeof window !== 'undefined' && 'documentPictureInPicture' in window);
 
   const iframeOwners = useRef(new Map<object, string>());
   const playerSlotRef = useRef<HTMLDivElement>(null);
@@ -84,18 +86,13 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { setPipSupported('documentPictureInPicture' in window); }, []);
-
-  /* Defaults once feeds exist: first embeddable channel on the single
-     player, and the first four queued for multiview. */
+  /* Defaults, derived rather than stored: until the operator picks, the
+     single player shows the first embeddable channel and multiview queues
+     the first four. Picking anything stores the choice from then on. */
   const embeddable = useMemo(() => feeds.filter(f => f.embed_allowed), [feeds]);
-  useEffect(() => {
-    if (!embeddable.length) return;
-    setSelected(prev => prev ?? embeddable[0].name);
-    setMulti(prev => (prev.length ? prev : embeddable.slice(0, MAX_MULTIVIEW).map(f => f.name)));
-  }, [embeddable]);
-
-  const selectedFeed = feeds.find(f => f.name === selected) ?? null;
+  const activeName = selected ?? embeddable[0]?.name ?? null;
+  const selectedFeed = feeds.find(f => f.name === activeName) ?? null;
+  const activeMulti = multi.length ? multi : embeddable.slice(0, MAX_MULTIVIEW).map(f => f.name);
 
   /* — Dead-player detection: the YouTube iframe API handshake, as in
        LiveNewsPreviews. Players post onReady (which lets us map a window to
@@ -168,7 +165,7 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
 
   /* Changing channel or mode while PiP is open would strand the player:
      bring it home first. */
-  useEffect(() => { closePip(); }, [selected, mode, closePip]);
+  useEffect(() => { closePip(); }, [activeName, mode, closePip]);
   useEffect(() => () => closePip(), [closePip]);
 
   const toggleFullscreen = () => {
@@ -177,10 +174,8 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
   };
 
   const toggleMulti = (name: string) => {
-    setMulti(prev => {
-      if (prev.includes(name)) return prev.filter(n => n !== name);
-      return prev.length >= MAX_MULTIVIEW ? prev : [...prev, name];
-    });
+    if (activeMulti.includes(name)) setMulti(activeMulti.filter(n => n !== name));
+    else if (activeMulti.length < MAX_MULTIVIEW) setMulti([...activeMulti, name]);
   };
 
   const playerFor = (feed: TvFeed, register: boolean) => {
@@ -242,7 +237,7 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
                   <button
                     key={feed.name}
                     onClick={() => setSelected(feed.name)}
-                    className={`${chip} flex items-center gap-1.5 ${selected === feed.name ? 'border-[var(--gold-primary)]/60 bg-[var(--gold-primary)]/15 text-[var(--gold-primary)]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'}`}
+                    className={`${chip} flex items-center gap-1.5 ${activeName === feed.name ? 'border-[var(--gold-primary)]/60 bg-[var(--gold-primary)]/15 text-[var(--gold-primary)]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'}`}
                   >
                     <span className="h-1 w-1 rounded-full bg-red-500" />
                     {feed.name}
@@ -316,16 +311,16 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
         ) : (
           <div className="p-3">
             <p className="mb-2 font-mono text-[9px] uppercase tracking-widest text-white/45">
-              Pick up to {MAX_MULTIVIEW} channels — {multi.length} on the wall
+              Pick up to {MAX_MULTIVIEW} channels — {activeMulti.length} on the wall
             </p>
             <div className="mb-3 flex flex-wrap gap-1.5">
               {embeddable.map(feed => {
-                const on = multi.includes(feed.name);
+                const on = activeMulti.includes(feed.name);
                 return (
                   <button
                     key={feed.name}
                     onClick={() => toggleMulti(feed.name)}
-                    disabled={!on && multi.length >= MAX_MULTIVIEW}
+                    disabled={!on && activeMulti.length >= MAX_MULTIVIEW}
                     className={`${chip} ${on ? 'border-[var(--gold-primary)]/60 bg-[var(--gold-primary)]/15 text-[var(--gold-primary)]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-35`}
                   >
                     {feed.name}
@@ -333,8 +328,8 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
                 );
               })}
             </div>
-            <div className={`grid gap-1.5 ${multi.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              {multi.map(name => {
+            <div className={`grid gap-1.5 ${activeMulti.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {activeMulti.map(name => {
                 const feed = feeds.find(f => f.name === name);
                 if (!feed) return null;
                 return (
@@ -349,7 +344,7 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
                   </div>
                 );
               })}
-              {!multi.length && (
+              {!activeMulti.length && (
                 <div className="flex aspect-video items-center justify-center border border-dashed border-white/15">
                   <span className="font-mono text-[9px] uppercase tracking-[0.25em] text-white/30">Nothing on the wall yet</span>
                 </div>
