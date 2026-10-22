@@ -162,9 +162,9 @@ export default function PrivacyPage() {
           <div className="flex flex-col gap-3">
             <Flow icon={<MapIcon className="h-4 w-4" />} title="Opening the map"
               summary={<>
-                So the map can open over your part of the world, our server asks an IP location service roughly where your
-                connection is. It is a city-level guess, it is not stored, and if it cannot tell, the map opens on a
-                well-covered city instead. The map itself (its tiles, the satellite view when you switch to it, and the
+                The map opens over El Paso, Texas — Glass Earth's home base; no location lookup happens on load. If you
+                use a "locate me" feature in search or directions, our server asks an IP location service roughly where
+                your connection is: a city-level guess, not stored. The map itself (its tiles, the satellite view when you switch to it, and the
                 typefaces) loads from the services that draw it, as with any website that shows a map.
               </>}
               services={[
