@@ -19,10 +19,10 @@ export const metadata: Metadata = {
  * Reviewed 2026-10-04 against: src/app/api/geo, src/app/api/osint/*,
  * src/app/api/ai/*, src/app/api/oi/*, src/lib/oi/* (client, service, web,
  * newsroom, markets), src/lib/sherlock.ts,
- * src/lib/chainIntel.ts, src/app/page.tsx (IP location, storage),
+ * src/app/page.tsx (IP location, storage),
  * src/components/OsirisMap.tsx (base map, satellite), src/app/globals.css
  * (fonts), src/components/LiveAlerts.tsx, src/lib/live-clouds.ts,
- * src/lib/donbot.ts, src/components/oi/assist/voice.ts, the CCTV sources, and
+ * src/components/oi/assist/voice.ts, the CCTV sources, and
  * every localStorage and sessionStorage key in src/.
  */
 
@@ -189,7 +189,6 @@ export default function PrivacyPage() {
                 { name: 'CIRCL and MITRE', what: 'a CVE number, for vulnerability details' },
                 { name: 'GitHub, and a dozen public profile sites', what: 'a username, to see where it is in use' },
                 { name: 'maclookup.app', what: 'a hardware (MAC) address, for its maker' },
-                { name: 'mempool.space, Blockscout, the public Solana network, CoinGecko', what: 'a wallet address, and prices to value it' },
               ]} />
 
             <Flow icon={<Camera className="h-4 w-4" />} title="Watching cameras and live alerts"
@@ -222,11 +221,10 @@ export default function PrivacyPage() {
               </p>
             </Flow>
 
-            <Flow icon={<Bot className="h-4 w-4" />} title="AI briefings and token scans"
+            <Flow icon={<Bot className="h-4 w-4" />} title="AI briefings"
               summary={<>
                 The briefing, analysis and overview buttons send the feed headlines they summarise to Google Gemini, on this
-                site’s own key. A DonBot token scan opens DigitalDon’s scanner in a sealed frame, which receives the token
-                you scan.
+                site’s own key.
               </>} />
           </div>
         </Section>

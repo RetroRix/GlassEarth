@@ -9,8 +9,6 @@ import {
   Maximize2, Minimize2, Shield, Star, TriangleAlert,
 } from 'lucide-react';
 import AiOverview from './AiOverview';
-import DonBotScan from './DonBotScan';
-import DigitalDonMark from './DigitalDonMark';
 import {
   FUNCTIONS, PULSE, WEI_REGIONS,
   exchangeClocks, formatMove, formatNet, formatPrice, formatVolume, heat, longName, monthChange,
@@ -53,7 +51,7 @@ const T = {
 
 /** One icon per function key, as RECON gives one to each tool. */
 const ICONS: Record<FunctionCode, ComponentType<{ className?: string; style?: CSSProperties }>> = {
-  WEI: LineChart, DEF: Shield, NRG: Droplets, CMDTY: Gem, FX: DollarSign, CRYPTO: Bitcoin, WATCH: Star, DON: DigitalDonMark,
+  WEI: LineChart, DEF: Shield, NRG: Droplets, CMDTY: Gem, FX: DollarSign, CRYPTO: Bitcoin, WATCH: Star,
 };
 
 const SECTION_OF: Record<string, FunctionCode> = { indices: 'WEI', stocks: 'DEF', oil: 'NRG', commodities: 'CMDTY', fx: 'FX', crypto: 'CRYPTO' };
@@ -320,7 +318,7 @@ export default function MarketsPanel({ data, spaceWeather }: MarketsPanelProps) 
 
   /** The rows for the function on screen, grouped by region on WEI. */
   const groups = useMemo<{ label?: string; rows: Quote[] }[]>(() => {
-    if (!current || current.section === 'donbot') return [];
+    if (!current) return [];
     if (current.section === 'watch') {
       return [{ rows: sortQuotes(watchlist.map(s => bySymbol.get(s)).filter((q): q is Quote => !!q), sort.key, sort.asc) }];
     }
@@ -519,7 +517,6 @@ export default function MarketsPanel({ data, spaceWeather }: MarketsPanelProps) 
   );
 
   const content = fn === 'HELP' ? help
-    : current?.section === 'donbot' ? <DonBotScan />
     : (
       <div className="rounded-lg border border-[var(--border-secondary)] bg-black/20 overflow-hidden">
         <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-[var(--border-secondary)] text-[9px] font-mono tracking-wider">

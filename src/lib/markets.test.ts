@@ -82,7 +82,6 @@ describe('the command line', () => {
     expect(parseCommand('wei', FEED)).toEqual({ kind: 'function', code: 'WEI' });
     expect(parseCommand('energy', FEED)).toEqual({ kind: 'function', code: 'NRG' });
     expect(parseCommand('5', FEED)).toEqual({ kind: 'function', code: 'FX' });
-    expect(parseCommand('donbot <GO>', FEED)).toEqual({ kind: 'function', code: 'DON' });
   });
 
   it('loads a security by ticker, bare symbol or name', () => {

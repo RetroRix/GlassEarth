@@ -122,7 +122,6 @@ export const FUNCTIONS = [
   { code: 'FX', key: 5, title: 'Currencies', section: 'fx', aliases: ['FXC', 'WCRS', 'CCY', 'CURNCY'] },
   { code: 'CRYPTO', key: 6, title: 'Digital Assets', section: 'crypto', aliases: ['XBT', 'COIN', 'COINS'] },
   { code: 'WATCH', key: 7, title: 'Watchlist', section: 'watch', aliases: ['MON', 'MONITOR', 'STARS'] },
-  { code: 'DON', key: 8, title: 'DonBot Token Scan', section: 'donbot', aliases: ['DONBOT', 'TOKEN', 'SCAN'] },
 ] as const;
 
 export type FunctionCode = (typeof FUNCTIONS)[number]['code'];
