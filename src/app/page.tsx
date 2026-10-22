@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import IntelFeed from '@/components/IntelFeed';
@@ -26,10 +26,13 @@ import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import WorldRemote from '@/components/WorldRemote';
 import ArcGISPanel from '@/components/ArcGISPanel';
+import TvPanel from '@/components/TvPanel';
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
 const SpaceCam = dynamic(() => import('@/components/SpaceCam'), { ssr: false });
 const CameraViewer = dynamic(() => import('@/components/CameraViewer'));
+const TheaterWall = dynamic(() => import('@/components/TheaterWall'), { ssr: false });
+const AmbientTv = dynamic(() => import('@/components/AmbientTv'), { ssr: false });
 const OiPanel = dynamic(() => import('@/components/OiPanel'));
 const DrawingToolbar = dynamic(() => import('@/components/DrawingToolbar'), { ssr: false });
 const DrawHud = dynamic(() => import('@/components/DrawHud'), { ssr: false });
@@ -219,6 +222,12 @@ export default function Dashboard() {
   }, [showMarkets]);
   const [showAlerts, setShowAlerts] = useState(false);
   const [showSpaceCam, setShowSpaceCam] = useState(false);
+  /* Camera Theater and its lean-back sibling. Full-screen overlays rather
+     than rail panels: a wall of cameras is the whole screen or it is nothing. */
+  const [showWall, setShowWall] = useState(false);
+  const [showAmbient, setShowAmbient] = useState(false);
+  const [showTv, setShowTv] = useState(false);
+  const [showSpotting, setShowSpotting] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showDrawing, setShowDrawing] = useState(false);
   const [drawMode, setDrawMode] = useState<DrawMode | null>(null);
@@ -326,7 +335,7 @@ export default function Dashboard() {
   const layerLiveStatus = useMemo(() => (transitStatus ? { transit: transitStatus.text } : undefined), [transitStatus]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'remote'|'oi'|null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'remote'|'oi'|'tv'|null>(null);
 
   // ── OSIRIS OI ── the run lives here, not in the panel, so the globe keeps
   // drawing it while the panel is closed. State goes to the map's OI layer
@@ -1053,9 +1062,9 @@ export default function Dashboard() {
       fetchEndpoint('/api/radiation', d => ({ radiation: d.stations }));
       layerFetchedRef.current.add('radiation');
     }
-    // Live News
+    // Live News (+ the FAST services the TV panel launches)
     if (activeLayers.live_news && !layerFetchedRef.current.has('live_news')) {
-      fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds }));
+      fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds, tv_services: d.services ?? [] }));
       layerFetchedRef.current.add('live_news');
     }
     // Weather
@@ -1793,6 +1802,20 @@ export default function Dashboard() {
           </AnimatePresence>
         </div>
 
+        <div className="relative group">
+          <button onClick={() => { setShowWall(true); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowTv(false); setShowSpotting(false); }} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title="Camera Theater — a wall of live cameras (Texas / El Paso first)" aria-label="Camera Theater">
+            <LayoutGrid className="w-4 h-4 text-white/60" />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">THEATER</span>
+        </div>
+
+        <div className="relative group">
+          <button onClick={() => { setShowTv(!showTv); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowSpotting(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showTv ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Television — live news, multiview, free streaming services" aria-label="Television" aria-expanded={showTv}>
+            <Tv className={`w-4 h-4 ${showTv ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">TV</span>
+        </div>
+
         <div ref={marketsAnchor} className="relative group">
           <button onClick={() => { setShowMarkets(!showMarkets); setShowOi(false); setShowAlerts(false); setShowSpaceCam(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showMarkets ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Markets — crypto prices, space weather, global indices" aria-label="Markets" aria-expanded={showMarkets}>
             <BarChart3 className={`w-4 h-4 ${showMarkets ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
@@ -2071,6 +2094,7 @@ export default function Dashboard() {
                 { id: 'markets' as const, icon: BarChart3, label: 'MARKETS' },
                 { id: 'intel' as const, icon: Newspaper, label: 'INTEL' },
                 { id: 'oi' as const, icon: Orbit, label: 'OI' },
+                { id: 'tv' as const, icon: Tv, label: 'TV' },
                 { id: 'search' as const, icon: Search, label: 'SEARCH' },
                 // Routing was reachable only from the desktop tool rail, so a
                 // phone could not open it at all. It sits next to SEARCH
@@ -2127,10 +2151,37 @@ export default function Dashboard() {
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[10px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'remote' ? 'WORLD REMOTE' : mobilePanel === 'oi' ? 'GLASS EARTH OI' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'remote' ? 'WORLD REMOTE' : mobilePanel === 'oi' ? 'GLASS EARTH OI' : mobilePanel === 'tv' ? 'TELEVISION & THEATER' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
+                  {mobilePanel === 'tv' && (
+                    <div className="space-y-2 pb-1">
+                      <button
+                        onClick={() => { setMobilePanel(null); setShowTv(true); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <Tv className="h-4 w-4 shrink-0 text-[var(--gold-primary)]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">Television</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">Live news · multiview · Pluto, Tubi & more</span>
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => { setMobilePanel(null); setShowWall(true); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <LayoutGrid className="h-4 w-4 shrink-0 text-[var(--gold-primary)]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">Camera Theater</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">A wall of live cameras — Texas / El Paso first</span>
+                        </span>
+                      </button>
+                      <p className="px-1 font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">
+                        Both open full-screen — the way a wall of cameras and a television should.
+                      </p>
+                    </div>
+                  )}
                   {mobilePanel === 'layers' && (
                     <>
                       <div className="glass-panel-sm p-2 mb-2">
@@ -2243,6 +2294,31 @@ export default function Dashboard() {
         onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
         besideOi={showOi && !oiTheater}
       />
+
+      {/* ── Camera Theater + Ambient TV ──
+          The wall hands cameras to the full viewer above: it closes first,
+          because the viewer is the place with the resolver and the analysis,
+          and the wall's picks are persisted so nothing is lost by leaving. */}
+      {showWall && (
+        <TheaterWall
+          cameras={data.cameras ?? []}
+          onClose={() => setShowWall(false)}
+          onOpenCamera={(cam) => { setShowWall(false); setActiveCamera(cam); }}
+          onAmbient={() => { setShowWall(false); setShowAmbient(true); }}
+        />
+      )}
+      {showAmbient && (
+        <AmbientTv cameras={data.cameras ?? []} onExit={() => setShowAmbient(false)} />
+      )}
+
+      {/* ── Television panel ── */}
+      {showTv && (
+        <TvPanel
+          feeds={data.live_feeds ?? []}
+          services={data.tv_services ?? []}
+          onClose={() => setShowTv(false)}
+        />
+      )}
 
       {/* ── Entity Graph Panel ── */}
       {/* Guidance belongs over the map, where the clicking happens. */}

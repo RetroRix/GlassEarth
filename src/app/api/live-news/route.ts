@@ -1,5 +1,6 @@
 
 import { NextResponse } from 'next/server';
+import { FAST_SERVICES } from '@/lib/tv-services';
 
 /**
  * OSIRIS — Live News Feeds v3
@@ -43,6 +44,10 @@ export async function GET() {
     feeds: LIVE_FEEDS,
     total: LIVE_FEEDS.length,
     categories: ['mainstream', 'government', 'finance', 'conflict', 'state'],
+    /* The FAST services (Pluto, Tubi, …) served alongside the news feeds for
+       the TV panel. They are launchers to the official services, not embeds —
+       none of them offers a third-party embed program. See lib/tv-services. */
+    services: FAST_SERVICES,
     timestamp: new Date().toISOString(),
   }, {
     headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=172800' },
