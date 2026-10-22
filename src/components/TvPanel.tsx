@@ -197,7 +197,7 @@ export default function TvPanel({ feeds: feedsProp, services: servicesProp, onCl
     return (
       <iframe
         ref={register ? registerIframe(feed.name) : undefined}
-        src={embedUrl(feed.url, true)}
+        src={embedUrl(feed.url, true) ?? feed.url}
         title={feed.name}
         className="h-full w-full border-0"
         allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
