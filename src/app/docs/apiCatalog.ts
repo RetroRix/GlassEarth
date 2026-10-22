@@ -176,30 +176,8 @@ export const API_GROUPS: ApiGroup[] = [
   {
     id: 'geopolitical',
     title: 'Geopolitical',
-    blurb: 'Conflict zones, frontlines, event streams, and country-level risk.',
+    blurb: 'Event streams and country-level risk.',
     endpoints: [
-      {
-        path: '/api/conflicts',
-        method: 'GET',
-        summary: 'A curated list of conflict zones, each with the recent world-news headlines that mention it.',
-        returns: [
-          'zones',
-          'activeWarzones',
-          'totalZones',
-          'totalHeadlines',
-          'zoneSource',
-          'sources',
-          'refreshInterval',
-          'timestamp',
-        ],
-        notes: 'Zones and their severity are kept by hand (`zoneSource: "curated"`), so `activeWarzones` counts ratings, not live events. Each zone’s `headlines` are news items that name it; they carry no coordinates. `refreshInterval` is the server’s recommended client poll interval in seconds — honour it rather than hard-coding your own.',
-      },
-      {
-        path: '/api/frontlines',
-        method: 'GET',
-        summary: 'Frontline geometry for active theatres.',
-        returns: ['frontlines', 'timestamp'],
-      },
       {
         path: '/api/gdelt',
         method: 'GET',
