@@ -1,5 +1,5 @@
 # Glass Earth — the live planet on one globe
-# https://osirisai.live
+# https://www.glassearthlive.com
 
 User-agent: *
 Allow: /
@@ -11,7 +11,7 @@ Disallow: /api/osint/*
 Allow: /api/health
 
 # Sitemap
-Sitemap: https://osirisai.live/sitemap.xml
+Sitemap: https://www.glassearthlive.com/sitemap.xml
 
 # Crawl-delay for respectful indexing
 Crawl-delay: 10

@@ -14,8 +14,8 @@ app, and configuring the optional API keys.
 ## 1. Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/simplifaisoul/osiris.git
-cd osiris
+git clone https://github.com/RetroRix/GlassEarth.git
+cd GlassEarth
 
 # optional: configure keys / scanner backend
 cp .env.template .env        # then edit .env
