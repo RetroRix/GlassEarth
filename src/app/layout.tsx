@@ -5,7 +5,7 @@ import "./globals.css";
 const SITE_URL = "https://github.com/RetroRix/GlassEarth";
 const SITE_NAME = "Glass Earth";
 const SITE_TITLE = "Glass Earth — The Live Planet on One Globe | Live Flights, Satellites, CCTV, Weather & Alerts";
-const SITE_DESCRIPTION = "The live planet on one globe: live aircraft, satellites and worldwide CCTV cameras on a 3D globe, with earthquakes, wildfires, severe weather, live news and markets — 20+ live data sources, plus your own aircraft. Based on the open-source OSIRIS project (MIT).";
+const SITE_DESCRIPTION = "See everything. Miss nothing. Glass Earth is the live planet on one globe: live flights, satellites, cameras, weather & alerts, and live TV.";
 
 export const viewport: Viewport = {
   themeColor: "#D4AF37",
@@ -81,7 +81,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Glass Earth — The Live Planet on One Globe | Live Flights, CCTV, Satellites & Weather",
-    description: "Track 10K+ aircraft, 2K satellites & worldwide CCTV on a 3D globe, with live earthquakes, fires, weather, news and markets. 20+ live feeds. Based on OSIRIS (MIT).",
+    description: "See everything. Miss nothing. Track 10K+ aircraft, 2K satellites & worldwide CCTV on a 3D globe, with live earthquakes, fires, weather, news and markets. 20+ live feeds. Based on OSIRIS (MIT).",
     type: "website",
     siteName: SITE_NAME,
     locale: "en_US",
@@ -99,7 +99,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "🌍 Glass Earth — The Live Planet on One Globe | Live Flights, CCTV, Satellites & Weather",
-    description: "Track 10K+ flights, satellites & CCTV worldwide, plus quakes, fires, weather, news and markets. 20+ live feeds.",
+    description: "See everything. Miss nothing. Track 10K+ flights, satellites & CCTV worldwide, plus quakes, fires, weather, news and markets. 20+ live feeds.",
     images: [`${SITE_URL}/og-image.png`],
   },
   category: "technology",
@@ -122,6 +122,7 @@ const jsonLd = {
   alternateName: ["Glass Earth"],
   url: SITE_URL,
   description: SITE_DESCRIPTION,
+  slogan: "See everything. Miss nothing.",
   applicationCategory: "TravelApplication",
   operatingSystem: "Web",
   browserRequirements: "Requires a modern web browser",

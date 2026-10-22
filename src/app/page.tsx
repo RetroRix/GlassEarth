@@ -1444,6 +1444,17 @@ export default function Dashboard() {
               </motion.div>
             </div>
 
+            {/* ── Tagline ── */}
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.55, duration: 0.7 }}
+              className="mb-3 z-[2] text-[13px] md:text-sm font-mono tracking-[0.25em] text-[var(--text-heading)]"
+              style={{ textShadow: '0 0 18px rgba(56,189,248,0.25)' }}
+            >
+              See everything. Miss nothing.
+            </motion.p>
+
             {/* ── Credit ── */}
             <motion.p
               initial={{ opacity: 0 }}

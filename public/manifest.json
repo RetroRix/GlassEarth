@@ -1,7 +1,7 @@
 {
   "name": "Glass Earth — The Live Planet on One Globe",
   "short_name": "Glass Earth",
-  "description": "Real-time global OSINT intelligence dashboard. Track 10K+ aircraft, 2K satellites, worldwide CCTV, earthquakes, wildfires, nuclear facilities, and more.",
+  "description": "See everything. Miss nothing. Real-time global OSINT intelligence dashboard. Track 10K+ aircraft, 2K satellites, worldwide CCTV, earthquakes, wildfires, nuclear facilities, and more.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#06060C",
