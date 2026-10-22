@@ -174,23 +174,6 @@ export default function PrivacyPage() {
                 { name: 'Google Fonts', what: 'the typefaces the site uses' },
               ]} />
 
-            <Flow icon={<Search className="h-4 w-4" />} title="Looking something up"
-              summary={<>
-                The RECON tools answer by asking the public service that holds the answer, from our server. That service
-                sees the email, domain, address or name you looked up, but not who you are. Two checks never leave our
-                server at all: <span className="text-[var(--text-primary)]">phone numbers</span> are read with a library
-                that runs here.
-              </>}
-              services={[
-                { name: 'XposedOrNot', what: 'an email address, for breach checks' },
-                { name: 'Hudson Rock', what: 'an email or domain, for infostealer checks' },
-                { name: 'Shodan InternetDB, RIPE, RDAP, Google Public DNS, crt.sh', what: 'a host, address or domain, for infrastructure, ownership, DNS and certificate lookups' },
-                { name: 'ip-api.com, Tor Project, AlienVault OTX', what: 'an IP address or indicator, for location and threat checks' },
-                { name: 'CIRCL and MITRE', what: 'a CVE number, for vulnerability details' },
-                { name: 'GitHub, and a dozen public profile sites', what: 'a username, to see where it is in use' },
-                { name: 'maclookup.app', what: 'a hardware (MAC) address, for its maker' },
-              ]} />
-
             <Flow icon={<Camera className="h-4 w-4" />} title="Watching cameras and live alerts"
               summary={<>
                 Camera pictures and streams come straight from whoever runs each camera (a road authority, a harbour, a

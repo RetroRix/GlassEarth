@@ -327,7 +327,7 @@ export default function DocsClient() {
             </p>
             <Callout tone="good" title="No credentials needed">
               Aviation, maritime, satellites, fires, earthquakes, weather, news, and CVE data all come from public
-              keyless feeds. Keys only matter for the optional RECON scanner and for raising rate limits.
+              keyless feeds. A few feeds accept an optional key to raise rate limits.
             </Callout>
           </Section>
 
@@ -365,8 +365,6 @@ print(len(data["commercial_flights"]), "commercial")`,
 # { "stats": { "flights": 9241, "sats": 2043, "cctv": 2117,
 #              "weather": 58, "nuclear": 191, "incidents": 412 },
 #   "timestamp": "2026-07-29T12:00:00Z" }`}</Pre>
-            <p>The OSINT lookups each take one subject, so they compose cleanly in a pipeline:</p>
-            <Pre label="Passive subdomain enumeration" lang="bash">{`curl -s "${origin}/api/osint/certs?domain=example.com" | jq -r '.subdomains[]'`}</Pre>
             <Callout tone="info" title="Try before you write code">
               Every GET endpoint in the reference below has a <strong>Send request</strong> button that runs it against
               this instance and shows the live response.
@@ -403,10 +401,7 @@ docker compose up -d`}</Pre>
             </h3>
             <div className="space-y-2">
               {[
-                {
-                  k: 'SCANNER_URL / SCANNER_KEY',
-                  v: 'Points at the separate RECON scanner backend. SCANNER_KEY must equal that backend’s OSIRIS_KEY. Leave both empty to disable RECON — /api/scanner then returns 503 by design.',
-                },
+
                 {
                   k: 'SDK_INGEST_KEY',
                   v: 'Shared secret for /api/sdk/ingest. The endpoint fails closed: while this is unset, ingestion is disabled and returns 503.',
@@ -449,10 +444,6 @@ docker compose up -d`}</Pre>
                 {
                   k: 'Layer Panel',
                   v: 'The left rail. Switches individual feeds on and off, and carries the theme selector.',
-                },
-                {
-                  k: 'RECON Toolkit',
-                  v: 'DNS, WHOIS, certificate transparency, IP and ASN enrichment, breach checks, sanctions, CVE lookup, port scanning.',
                 },
                 {
                   k: 'Intel Feed',
@@ -675,11 +666,6 @@ mcp_servers:
                 </div>
               ))}
             </div>
-            <Callout tone="warn" title="Responsible use">
-              The RECON scanner and <Code>/api/osint/sweep</Code> generate traffic against the targets you name. Only
-              point them at infrastructure you own or have written authorisation to test. The remaining OSINT routes
-              are passive and query third-party datasets rather than the subject itself.
-            </Callout>
           </Section>
 
           {API_GROUPS.map(group => (
