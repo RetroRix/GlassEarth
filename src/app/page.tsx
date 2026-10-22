@@ -27,6 +27,7 @@ import LiveAlerts from '@/components/LiveAlerts';
 import WorldRemote from '@/components/WorldRemote';
 import ArcGISPanel from '@/components/ArcGISPanel';
 import TvPanel from '@/components/TvPanel';
+import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
 const SpaceCam = dynamic(() => import('@/components/SpaceCam'), { ssr: false });
@@ -1816,6 +1817,13 @@ export default function Dashboard() {
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">TV</span>
         </div>
 
+        <div className="relative group">
+          <button onClick={() => { setShowSpotting(!showSpotting); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showSpotting ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Plane Spotting — 24/7 airport cameras with LiveATC links" aria-label="Plane Spotting" aria-expanded={showSpotting}>
+            <Plane className={`w-4 h-4 ${showSpotting ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SPOTTING</span>
+        </div>
+
         <div ref={marketsAnchor} className="relative group">
           <button onClick={() => { setShowMarkets(!showMarkets); setShowOi(false); setShowAlerts(false); setShowSpaceCam(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showMarkets ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Markets — crypto prices, space weather, global indices" aria-label="Markets" aria-expanded={showMarkets}>
             <BarChart3 className={`w-4 h-4 ${showMarkets ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
@@ -2317,6 +2325,14 @@ export default function Dashboard() {
           feeds={data.live_feeds ?? []}
           services={data.tv_services ?? []}
           onClose={() => setShowTv(false)}
+        />
+      )}
+
+      {/* ── Plane Spotting panel ── */}
+      {showSpotting && (
+        <PlaneSpottingPanel
+          onClose={() => setShowSpotting(false)}
+          onFlyTo={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
         />
       )}
 
