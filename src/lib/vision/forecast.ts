@@ -53,7 +53,7 @@ export function cameraItem(camera: CatalogueCamera & { km: number }, a: FrameAna
     source: camera.source || 'Public camera',
     published: a.at,
     ...(camera.page ? { url: camera.page } : {}),
-    excerpt: `At ${when} this camera, ${camera.km} km from ${place}, ${saw}. Counted by OSIRIS's built-in detector, which misses small, distant or hidden objects, so the counts are a floor.`,
+    excerpt: `At ${when} this camera, ${camera.km} km from ${place}, ${saw}. Counted by Glass Earth's built-in detector, which misses small, distant or hidden objects, so the counts are a floor.`,
     place: [camera.city, camera.country].filter(Boolean).join(', ') || place,
     lat: camera.lat,
     lng: camera.lng,

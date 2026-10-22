@@ -65,7 +65,7 @@ describe('cameraEvidence', () => {
 
   it('words what it saw as a dated source, honest about the counts', () => {
     const item = cameraItem(cam('b', 1.2), analysis({ car: 31, truck: 2 }), 'Madrid', 'v1');
-    expect(item.excerpt).toBe("At 2026-10-09 08:15 UTC this camera, 1.2 km from Madrid, showed 31 cars, 2 trucks in view, well lit. Counted by OSIRIS's built-in detector, which misses small, distant or hidden objects, so the counts are a floor.");
+    expect(item.excerpt).toBe("At 2026-10-09 08:15 UTC this camera, 1.2 km from Madrid, showed 31 cars, 2 trucks in view, well lit. Counted by Glass Earth's built-in detector, which misses small, distant or hidden objects, so the counts are a floor.");
     expect(item.published).toBe('2026-10-09T08:15:00.000Z');
   });
 

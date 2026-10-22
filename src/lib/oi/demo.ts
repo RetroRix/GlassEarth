@@ -213,7 +213,7 @@ function answer(req: ChatRequest): string {
     const push = u.includes('THE MARKET IN THIS WORLD') ? { price_push: Math.round((hash(seed + 'p') - 0.5) * 0.12 * 1000) / 1000 } : {};
     return JSON.stringify({ events, state: { ...state, note: up ? 'Momentum builds, slowly.' : 'Positions harden.' }, ...push });
   }
-  if (u.includes('You are the OSIRIS report agent') && u.includes('JSON shape')) {
+  if (u.includes('You are the Glass Earth report agent') && u.includes('JSON shape')) {
     const swarm = Number(u.match(/The worlds pooled give (\d+)%/)?.[1] ?? 35) / 100;
     const kind = /^KIND: (\w+)/m.exec(u)?.[1] ?? 'binary';
     const median = parseFloat(u.match(/median is ([-0-9.,]+)/)?.[1]?.replace(/,/g, '') ?? '');

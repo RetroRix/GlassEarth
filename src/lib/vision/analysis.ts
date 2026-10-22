@@ -174,6 +174,6 @@ export function forModel(a: FrameAnalysis, watch?: WatchSummary) {
     light: a.light,
     picture: `${a.width}x${a.height}`,
     ...(watch ? { watch: { seconds: watch.seconds, frames: watch.frames, changed: watch.changed, vehicles: watch.vehicles, counts: watch.counts, motion: watch.motion, trend: watch.trend } } : {}),
-    detector: 'OSIRIS built-in detector (YOLOX-nano). Counts what is clearly visible; small, distant, dark or hidden objects are missed, so treat counts as a floor.',
+    detector: 'Glass Earth built-in detector (YOLOX-nano). Counts what is clearly visible; small, distant, dark or hidden objects are missed, so treat counts as a floor.',
   };
 }
