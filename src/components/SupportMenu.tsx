@@ -11,17 +11,17 @@ import { ChevronDown, Coffee, ShoppingBag } from 'lucide-react';
  */
 const OPTIONS = [
   {
-    href: 'https://ko-fi.com/M8D41ZYW4Z',
+    href: 'https://ko-fi.com/glassearthlive',
     Icon: Coffee,
     label: 'SUPPORT ON KO-FI',
     detail: 'Tip once or monthly',
     color: 'var(--gold-primary)',
   },
   {
-    href: 'https://shop.osirisai.live/',
+    href: 'https://glassearth-shop.fourthwall.com',
     Icon: ShoppingBag,
     label: 'BUY MERCH',
-    detail: 'shop.osirisai.live',
+    detail: 'glassearth-shop.fourthwall.com',
     color: 'var(--cyan-primary)',
   },
 ] as const;
