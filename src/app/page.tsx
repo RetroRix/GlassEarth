@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import IntelFeed from '@/components/IntelFeed';
@@ -28,6 +28,10 @@ import WorldRemote from '@/components/WorldRemote';
 import ArcGISPanel from '@/components/ArcGISPanel';
 import TvPanel from '@/components/TvPanel';
 import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
+import StationsPanel from '@/components/StationsPanel';
+import RadioNowPlaying from '@/components/RadioNowPlaying';
+import { loadTvFavorites, type RadioStation, type TvChannel } from '@/lib/stations';
+const TvWall = dynamic(() => import('@/components/TvWall'), { ssr: false });
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
 const SpaceCam = dynamic(() => import('@/components/SpaceCam'), { ssr: false });
@@ -228,6 +232,10 @@ export default function Dashboard() {
   const [showWall, setShowWall] = useState(false);
   const [showAmbient, setShowAmbient] = useState(false);
   const [showTv, setShowTv] = useState(false);
+  const [showStations, setShowStations] = useState(false);
+  const [showTvWall, setShowTvWall] = useState(false);
+  const [tvWallSeed, setTvWallSeed] = useState<{ channels: TvChannel[]; favorites: TvChannel[] }>({ channels: [], favorites: [] });
+  const [radioStation, setRadioStation] = useState<RadioStation | null>(null);
   const [showSpotting, setShowSpotting] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showDrawing, setShowDrawing] = useState(false);
@@ -1823,6 +1831,13 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
+          <button onClick={() => { setShowStations(!showStations); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowSpotting(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showStations ? 'bg-[#00E5FF]/20' : 'hover:bg-white/10'}`} title="Stations — live TV channels and internet radio from open directories" aria-label="Stations" aria-expanded={showStations}>
+            <RadioTower className={`w-4 h-4 ${showStations ? 'text-[#00E5FF]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">STATIONS</span>
+        </div>
+
+        <div className="relative group">
           <button onClick={() => { setShowSpotting(!showSpotting); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showSpotting ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Plane Spotting — 24/7 airport cameras with LiveATC links" aria-label="Plane Spotting" aria-expanded={showSpotting}>
             <Plane className={`w-4 h-4 ${showSpotting ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
           </button>
@@ -2190,6 +2205,26 @@ export default function Dashboard() {
                           <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">A wall of live cameras — Texas / El Paso first</span>
                         </span>
                       </button>
+                      <button
+                        onClick={() => { setMobilePanel(null); setShowStations(true); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <RadioTower className="h-4 w-4 shrink-0 text-[#00E5FF]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">TV & Radio Stations</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">World channels · internet radio · IPTV-org + Radio Browser</span>
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => { setMobilePanel(null); setTvWallSeed({ channels: [], favorites: loadTvFavorites() }); setShowTvWall(true); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <LayoutGrid className="h-4 w-4 shrink-0 text-[var(--gold-primary)]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">TV Wall</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">A wall of live TV channels — world news first</span>
+                        </span>
+                      </button>
                       <p className="px-1 font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">
                         Both open full-screen — the way a wall of cameras and a television should.
                       </p>
@@ -2331,6 +2366,30 @@ export default function Dashboard() {
           services={data.tv_services ?? []}
           onClose={() => setShowTv(false)}
         />
+      )}
+
+      {/* ── Stations panel (IPTV-org TV + Radio Browser) ── */}
+      {showStations && (
+        <StationsPanel
+          onClose={() => setShowStations(false)}
+          onPlayRadio={(station) => setRadioStation(station)}
+          currentRadioUuid={radioStation?.uuid ?? null}
+          onOpenTvWall={(channels, favorites) => { setTvWallSeed({ channels, favorites }); setShowStations(false); setShowTvWall(true); }}
+        />
+      )}
+
+      {/* ── TV Wall ── */}
+      {showTvWall && (
+        <TvWall
+          channels={tvWallSeed.channels}
+          favorites={tvWallSeed.favorites}
+          onClose={() => setShowTvWall(false)}
+        />
+      )}
+
+      {/* ── Radio now-playing bar — page-level so it survives the panel ── */}
+      {radioStation && (
+        <RadioNowPlaying station={radioStation} onStop={() => setRadioStation(null)} />
       )}
 
       {/* ── Plane Spotting panel ── */}
