@@ -231,6 +231,46 @@ describe('loadIbi511Cameras', () => {
     ]);
     expect(cams).toHaveLength(120);
   });
+
+  /* Pennsylvania publishes ~9% of its rows with no snapshot on a
+     snapshot-only feed, and Wisconsin ~5% with out-of-state geocodes.
+     Those rows arrive and are dropped by mapping on purpose — the short-
+     read guard counts rows received, so a complete read like this must
+     not throw the refresh away. */
+  it('keeps a complete read even when a tenth of its rows are unpublishable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const query = JSON.parse(new URL(String(input)).searchParams.get('query') ?? '{}');
+      const rows = Array.from({ length: Math.min(query.length, 100 - query.start) }, (_, i) => {
+        const id = query.start + i + 1;
+        return {
+          ...sample,
+          id,
+          latLng: { geography: { wellKnownText: 'POINT (-80.3 40.6)' } },
+          // One row in ten has no snapshot, and this deployment is snapshot-only.
+          images: [{ ...(sample.images![0]), imageUrl: id % 10 === 0 ? '' : `/map/Cctv/${id}` }],
+        };
+      });
+      return Response.json({ recordsTotal: 100, data: rows });
+    }));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const cams = await loadIbi511Cameras({
+      ...FDOT, snapshotOnly: true,
+      bounds: { minLat: 39.7, maxLat: 42.3, minLng: -80.6, maxLng: -74.7 },
+    });
+
+    expect(cams).toHaveLength(90);
+  });
+
+  it('still throws when every row arrives but none can be published', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      recordsTotal: 1,
+      data: [{ ...sample, images: [{ imageUrl: '', videoUrl: '' }] }],
+    })));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(loadIbi511Cameras({ ...FDOT, snapshotOnly: true })).rejects.toThrow(/none were publishable/);
+  });
 });
 
 describe('parseWkt', () => {

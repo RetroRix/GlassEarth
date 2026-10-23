@@ -220,8 +220,10 @@ export async function loadIbi511Cameras(cfg: Ibi511Source): Promise<CctvCamera[]
   // The first page also tells us how many there are in total.
   const first = await fetchPage(cfg, 0);
   const seen = new Map<number, CctvCamera>();
+  let rowsReceived = 0;
 
   const ingest = (rows: Ibi511Record[]) => {
+    rowsReceived += rows.length;
     for (const rec of rows) {
       const cam = mapIbi511Record(rec, cfg);
       if (cam) seen.set(rec.id, cam);
@@ -258,9 +260,19 @@ export async function loadIbi511Cameras(cfg: Ibi511Source): Promise<CctvCamera[]
      and served that for the next half hour. Throwing hands the decision to
      sourceCache, which keeps the last good index instead — none of these
      feeds drops rows of its own accord, so anything materially short of
-     `recordsTotal` is pages we did not get. */
-  if (first.total > 0 && cams.length < first.total * 0.95) {
-    throw new Error(`${cfg.source} short read: ${cams.length} of ${first.total}`);
+     `recordsTotal` is pages we did not get.
+     The count is rows received, not cameras kept: mapping drops some rows
+     on purpose — no usable media, a geocode over the state line — and how
+     many varies by deployment (Pennsylvania publishes ~9% snapshot-less
+     rows on a snapshot-only feed, Wisconsin ~5% out-of-state geocodes).
+     Counting kept cameras against recordsTotal threw those two states'
+     refreshes away forever. A feed whose rows all arrive but none can be
+     published is still a failure, not an empty state. */
+  if (first.total > 0 && rowsReceived < first.total * 0.95) {
+    throw new Error(`${cfg.source} short read: ${rowsReceived} of ${first.total} rows`);
+  }
+  if (first.total > 0 && cams.length === 0) {
+    throw new Error(`${cfg.source} returned ${first.total} rows but none were publishable`);
   }
 
   console.log(`[OSIRIS] ${cfg.source} cameras: ${cams.length} of ${first.total}`);
