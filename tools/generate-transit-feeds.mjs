@@ -56,6 +56,12 @@ const EXTRA = [
   { provider: 'OVapi (all of the Netherlands)', country: 'NL', area: [3.2, 50.7, 7.3, 53.7], url: 'https://gtfs.ovapi.nl/nl/vehiclePositions.pb', license: 'https://gtfs.ovapi.nl/README', static: ['https://gtfs.ovapi.nl/nl/gtfs-nl.zip'] },
   { provider: 'TransLink (South East Queensland)', country: 'AU', url: 'https://gtfsrt.api.translink.com.au/api/realtime/seq/VehiclePositions', license: 'https://translink.com.au/about-translink/open-data', static: ['https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip'] },
   { provider: 'TTC (Toronto)', country: 'CA', url: 'https://bustime.ttc.ca/gtfsrt/vehicles', license: 'https://open.toronto.ca/open-data-licence/' },
+  // Sun Metro's realtime lives on an AWS endpoint the Mobility Database only
+  // models as a download_url inside its static feed (mdb_source_id 1171);
+  // there is no catalogue realtime row for it, which is why El Paso — alone
+  // among Texas metros — had no live transit. Probed 2026-10-23: keyless,
+  // 56 vehicles in the El Paso bbox. Hosted by a third party (no SLA).
+  { provider: 'Sun Metro (El Paso)', country: 'US', region: 'El Paso', url: 'https://hwmftxz4dc.execute-api.us-east-1.amazonaws.com/gtfsrt/gtfsvp', license: 'https://elpasotexas.gov/sun-metro' },
   { provider: 'CapMetro (Austin)', country: 'US', url: 'https://data.texas.gov/download/eiei-9rpf/application%2Foctet-stream', license: 'https://www.capmetro.org/developertools' },
   { provider: 'Metro Transit (Minneapolis–St Paul)', country: 'US', url: 'https://svc.metrotransit.org/mtgtfs/vehiclepositions.pb', license: 'https://svc.metrotransit.org/' },
   { provider: 'MBTA (Boston)', country: 'US', url: 'https://cdn.mbta.com/realtime/VehiclePositions.pb', license: 'https://www.mbta.com/developers', static: ['https://cdn.mbta.com/MBTA_GTFS.zip'] },

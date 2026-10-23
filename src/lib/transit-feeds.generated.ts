@@ -4609,5 +4609,30 @@ export const TRANSIT_FEEDS: TransitFeed[] = [
     ],
     "mdb": "2619",
     "vehiclesAtProbe": 2
+  },
+  {
+    "id": "sun-metro-el-paso",
+    "provider": "Sun Metro (El Paso)",
+    "country": "US",
+    "region": "El Paso",
+    "url": "https://hwmftxz4dc.execute-api.us-east-1.amazonaws.com/gtfsrt/gtfsvp",
+    "bbox": [
+      -106.7033,
+      31.6748,
+      -106.1933,
+      32.0765
+    ],
+    "center": [
+      -106.435,
+      31.84
+    ],
+    "core": [
+      -106.59,
+      31.71,
+      -106.28,
+      31.97
+    ],
+    "license": "https://elpasotexas.gov/sun-metro",
+    "vehiclesAtProbe": 56
   }
 ];
