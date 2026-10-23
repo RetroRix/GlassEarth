@@ -46,6 +46,39 @@ import { fetchGeorgiaCameras } from './georgia';
 import { fetchNorthCarolinaCameras } from './northcarolina';
 import { fetchArizonaCameras } from './arizona';
 import { fetchTexasCameras } from './texas';
+import { fetchAlabamaCameras } from './alabama';
+import { fetchAlaskaCameras } from './alaska';
+import { fetchArkansasCameras } from './arkansas';
+import { fetchColoradoCameras } from './colorado';
+import { fetchConnecticutCameras } from './connecticut';
+import { fetchDcCameras } from './dc';
+import { fetchDelawareCameras } from './delaware';
+import { fetchIdahoCameras } from './idaho';
+import { fetchIllinoisCameras } from './illinois';
+import { fetchIowaCameras } from './iowa';
+import { fetchKansasCameras } from './kansas';
+import { fetchKentuckyCameras } from './kentucky';
+import { fetchMarylandCameras } from './maryland';
+import { fetchMassachusettsCameras } from './massachusetts';
+import { fetchMinnesotaCameras } from './minnesota';
+import { fetchMississippiCameras } from './mississippi';
+import { fetchMissouriCameras } from './missouri';
+import { fetchMontanaCameras } from './montana';
+import { fetchNebraskaCameras } from './nebraska';
+import { fetchNewEnglandCameras } from './newengland';
+import { fetchNewMexicoCameras } from './newmexico';
+import { fetchNewYorkCameras } from './newyork';
+import { fetchNorthDakotaCameras } from './northdakota';
+import { fetchOhioCameras } from './ohio';
+import { fetchOklahomaCameras } from './oklahoma';
+import { fetchPennsylvaniaCameras } from './pennsylvania';
+import { fetchSouthCarolinaCameras } from './southcarolina';
+import { fetchSouthDakotaCameras } from './southdakota';
+import { fetchTennesseeCameras } from './tennessee';
+import { fetchVirginiaCameras } from './virginia';
+import { fetchWestVirginiaCameras } from './westvirginia';
+import { fetchWisconsinCameras } from './wisconsin';
+import { fetchWyomingCameras } from './wyoming';
 import { fetchEastAsiaCameras, fetchSeAsiaCameras, fetchWestAsiaCameras } from './opencctv';
 import {
   fetchLatamLiveCameras,
@@ -62,7 +95,7 @@ import {
 /**
  * OSIRIS — Worldwide CCTV Camera API v2
  * Viewport-aware: pass ?region=xx to load cameras for specific regions
- * Supports: uk, us-east, us-west, us-central, canada, europe, asia
+ * Supports: uk, us-east, us-west, canada, europe, asia, plus one region per US state
  * Or pass ?lat=x&lng=y&radius=5 for proximity-based loading
  */
 
@@ -264,33 +297,15 @@ async function fetchCanadaCameras(): Promise<any[]> {
   return cams.filter((c: any) => c.lat && c.lng);
 }
 
-// ── US-CENTRAL: Chicago, Houston, Dallas, Denver ──
-async function fetchUSCentralCameras(): Promise<any[]> {
-  const cams: any[] = [];
-  // Illinois DOT
-  {
-    const data = await subSource('IDOT', 'https://www.travelmidwest.com/lmiga/cameraReport.json', 8000);
-    if (data) {
-      /* travelmidwest answers 200 with {updatedMessage, noDataMessage} and no
-         cameras at all — an object, not the array this assumed. That threw a
-         TypeError the old silent catch quietly absorbed; now it would take
-         us-central down with it, so the shape is checked. */
-      const rows = Array.isArray(data?.cameraReports) ? data.cameraReports : Array.isArray(data) ? data : [];
-      for (const cam of rows.slice(0, 800)) {
-        if (!cam.latitude || !cam.longitude) continue;
-        cams.push({
-          id: `ildot-${cams.length}`, lat: cam.latitude, lng: cam.longitude,
-          name: cam.cameraName || cam.description || 'IDOT Camera', city: 'Illinois', country: 'US',
-          feed_url: cam.imageUrl || cam.url || '', source: 'IDOT',
-        });
-      }
-    }
-  }
+/* US-Central's only source used to be Illinois via travelmidwest's
+   cameraReport.json, which now answers 200 with no cameras at all — IDOT's
+   inventory has left that feed. ./illinois serves the state from IDOT's own
+   ArcGIS layer, and every other central state has a region of its own now,
+   so the bucket is retired rather than kept as a source that can only ever
+   contribute nothing. */
 
-  return cams.filter((c: any) => c.lat && c.lng);
-}
-
-// ── US-EAST: OH, DC, Florida, Georgia ──
+// ── US-EAST: curated cameras with no state feed of their own ──
+// (Ohio's ODOT inventory is ./ohio, DC's is ./dc; Florida and Georgia retired to their own regions.)
 async function fetchUSEastCameras(): Promise<any[]> {
   const cams: any[] = [];
 
@@ -437,7 +452,6 @@ const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'uk': fetchTfLCameras,
   'us-west': async () => { const [w, c] = await Promise.all([fetchWSDOTCameras(), fetchCaltransCameras()]); return [...w, ...c]; },
   'us-east': fetchUSEastCameras,
-  'us-central': fetchUSCentralCameras,
   'canada': fetchCanadaCameras,
   'europe': fetchEuropeCameras,
   'netherlands': fetchNetherlandsCameras,
@@ -479,6 +493,39 @@ const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'northcarolina': fetchNorthCarolinaCameras,
   'arizona': fetchArizonaCameras,
   'texas': fetchTexasCameras,
+  'alabama': fetchAlabamaCameras,
+  'alaska': fetchAlaskaCameras,
+  'arkansas': fetchArkansasCameras,
+  'colorado': fetchColoradoCameras,
+  'connecticut': fetchConnecticutCameras,
+  'dc': fetchDcCameras,
+  'delaware': fetchDelawareCameras,
+  'idaho': fetchIdahoCameras,
+  'illinois': fetchIllinoisCameras,
+  'iowa': fetchIowaCameras,
+  'kansas': fetchKansasCameras,
+  'kentucky': fetchKentuckyCameras,
+  'maryland': fetchMarylandCameras,
+  'massachusetts': fetchMassachusettsCameras,
+  'minnesota': fetchMinnesotaCameras,
+  'mississippi': fetchMississippiCameras,
+  'missouri': fetchMissouriCameras,
+  'montana': fetchMontanaCameras,
+  'nebraska': fetchNebraskaCameras,
+  'newengland': fetchNewEnglandCameras,
+  'newmexico': fetchNewMexicoCameras,
+  'newyork': fetchNewYorkCameras,
+  'northdakota': fetchNorthDakotaCameras,
+  'ohio': fetchOhioCameras,
+  'oklahoma': fetchOklahomaCameras,
+  'pennsylvania': fetchPennsylvaniaCameras,
+  'southcarolina': fetchSouthCarolinaCameras,
+  'southdakota': fetchSouthDakotaCameras,
+  'tennessee': fetchTennesseeCameras,
+  'virginia': fetchVirginiaCameras,
+  'westvirginia': fetchWestVirginiaCameras,
+  'wisconsin': fetchWisconsinCameras,
+  'wyoming': fetchWyomingCameras,
   'eastasia': fetchEastAsiaCameras,
   'seasia': fetchSeAsiaCameras,
   'westasia': fetchWestAsiaCameras,
@@ -517,7 +564,7 @@ const REGION_FETCHERS: Record<string, RegionFetcher> = Object.fromEntries(
  * this drops a slow region from the current response, not from the map.
  */
 const REGION_BUDGET_MS = 12_000;
-// Florida and Georgia page through thousands of records and take longer on a cold cache.
+// Florida, Georgia and Illinois page through thousands of records and take longer on a cold cache.
 const PAGED_REGION_BUDGET_MS = 30_000;
 
 /**
@@ -536,7 +583,7 @@ const PAGED_REGION_BUDGET_MS = 30_000;
  * How long a response waits on regions it does not already have.
  *
  * A catalogue that already holds 35,000 cameras must not be held hostage by
- * one upstream that hangs. us-central does exactly that — it burns the full
+ * one upstream that hangs. A stuck region does exactly that — it burns the full
  * slot budget on every attempt — and waiting on it turned a 0.2s response
  * into a 12s one for every visitor, which is what made the cameras take so
  * long to appear. With cameras already in hand, wait only briefly for the
@@ -584,7 +631,7 @@ function refreshRegion(region: string): Promise<any[]> {
   if (existing) return existing;
 
   const started = regionPool.run(async () => {
-    const budgetMs = region === 'florida' || region === 'georgia' ? PAGED_REGION_BUDGET_MS : REGION_BUDGET_MS;
+    const budgetMs = region === 'florida' || region === 'georgia' || region === 'illinois' ? PAGED_REGION_BUDGET_MS : REGION_BUDGET_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
     try {
@@ -750,7 +797,7 @@ async function collectRegions(regions: string[]): Promise<{ cameras: Record<stri
     .then(result => { if (result.length) cameras[region] = result; })
     .catch(() => { /* the cache logs it and keeps the last good index */ }));
 
-  const slowSingleRegion = missing.length === 1 && (missing[0] === 'florida' || missing[0] === 'georgia');
+  const slowSingleRegion = missing.length === 1 && (missing[0] === 'florida' || missing[0] === 'georgia' || missing[0] === 'illinois');
   const budget = Object.keys(cameras).length ? WARM_GRACE_MS : slowSingleRegion ? PAGED_REGION_BUDGET_MS : REGION_BUDGET_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>(resolve => { timer = setTimeout(resolve, budget); });
@@ -779,21 +826,50 @@ function getRegionsForBounds(lat: number, lng: number, radius: number): string[]
   if (lat > 34.9 && lat < 42.1 && lng > -120.1 && lng < -113.9) regions.push('nevada');
   // Texas (TxDOT), including El Paso west of the central region.
   if (lat > 25.8 && lat < 36.6 && lng > -106.7 && lng < -93.4) regions.push('texas');
-  // US-Central
-  if (lat > 24 && lat < 49 && lng > -105 && lng < -80) regions.push('us-central');
-  // Michigan (MDOT) — explicit, since us-central only covers Illinois
+  /* Every state below has a region of its own now, so each is listed
+     explicitly, the way Michigan and Indiana always were: the broad
+     us-east / us-west boxes cover the territory but carry none of
+     these agencies. */
   if (lat > 41.6 && lat < 48.3 && lng > -90.5 && lng < -82.1) regions.push('michigan');
-  // Indiana (INDOT TrafficWise) — explicit, since us-central only covers Illinois
   if (lat > 37.7 && lat < 41.9 && lng > -88.2 && lng < -84.6) regions.push('indiana');
-  // Louisiana (LADOTD 511) — explicit, since neither us-central nor us-east reaches the Gulf coast
   if (lat > 28.8 && lat < 33.1 && lng > -94.2 && lng < -88.6) regions.push('louisiana');
-  /* The rest of the southern tier, all on the same IBI 511 stack. Each is
-     listed explicitly for the same reason Louisiana is: the broad us-east and
-     us-central boxes cover the latitudes but carry none of these agencies. */
   if (lat > 24.4 && lat < 31.1 && lng > -87.7 && lng < -79.9) regions.push('florida');
   if (lat > 30.3 && lat < 35.1 && lng > -85.7 && lng < -80.8) regions.push('georgia');
   if (lat > 33.8 && lat < 36.6 && lng > -84.4 && lng < -75.4) regions.push('northcarolina');
   if (lat > 31.3 && lat < 37.1 && lng > -115.0 && lng < -109.0) regions.push('arizona');
+  if (lat > 36.9 && lat < 42.5 && lng > -91.6 && lng < -87.5) regions.push('illinois');
+  if (lat > 38.4 && lat < 42.0 && lng > -84.8 && lng < -80.5) regions.push('ohio');
+  if (lat > 43.4 && lat < 49.4 && lng > -97.3 && lng < -89.4) regions.push('minnesota');
+  if (lat > 40.4 && lat < 45.1 && lng > -79.8 && lng < -71.8) regions.push('newyork');
+  if (lat > 39.7 && lat < 42.3 && lng > -80.6 && lng < -74.7) regions.push('pennsylvania');
+  if (lat > 36.5 && lat < 39.5 && lng > -83.7 && lng < -75.2) regions.push('virginia');
+  if (lat > 37.2 && lat < 40.6 && lng > -82.7 && lng < -77.8) regions.push('westvirginia');
+  if (lat > 37.9 && lat < 39.7 && lng > -79.5 && lng < -75.0) regions.push('maryland');
+  if (lat > 38.79 && lat < 39.0 && lng > -77.12 && lng < -76.9) regions.push('dc');
+  if (lat > 38.4 && lat < 39.9 && lng > -75.8 && lng < -75.0) regions.push('delaware');
+  if (lat > 41.0 && lat < 42.1 && lng > -73.8 && lng < -71.8) regions.push('connecticut');
+  if (lat > 41.2 && lat < 42.9 && lng > -73.5 && lng < -69.9) regions.push('massachusetts');
+  if (lat > 42.7 && lat < 47.5 && lng > -73.5 && lng < -66.9) regions.push('newengland');
+  if (lat > 36.5 && lat < 39.2 && lng > -89.6 && lng < -82.0) regions.push('kentucky');
+  if (lat > 34.9 && lat < 36.7 && lng > -90.3 && lng < -81.6) regions.push('tennessee');
+  if (lat > 32.0 && lat < 35.2 && lng > -83.4 && lng < -78.5) regions.push('southcarolina');
+  if (lat > 30.1 && lat < 35.1 && lng > -88.5 && lng < -84.9) regions.push('alabama');
+  if (lat > 30.1 && lat < 35.0 && lng > -91.7 && lng < -88.1) regions.push('mississippi');
+  if (lat > 33.0 && lat < 36.5 && lng > -94.6 && lng < -90.1) regions.push('arkansas');
+  if (lat > 36.0 && lat < 40.6 && lng > -95.8 && lng < -89.1) regions.push('missouri');
+  if (lat > 40.4 && lat < 43.5 && lng > -96.6 && lng < -91.0) regions.push('iowa');
+  if (lat > 42.4 && lat < 47.1 && lng > -92.9 && lng < -86.8) regions.push('wisconsin');
+  if (lat > 36.9 && lat < 40.1 && lng > -102.1 && lng < -94.6) regions.push('kansas');
+  if (lat > 40.0 && lat < 43.0 && lng > -104.1 && lng < -95.3) regions.push('nebraska');
+  if (lat > 42.5 && lat < 45.9 && lng > -104.1 && lng < -96.4) regions.push('southdakota');
+  if (lat > 45.9 && lat < 49.0 && lng > -104.1 && lng < -96.7) regions.push('northdakota');
+  if (lat > 33.6 && lat < 37.0 && lng > -103.0 && lng < -94.4) regions.push('oklahoma');
+  if (lat > 36.9 && lat < 41.0 && lng > -109.1 && lng < -102.0) regions.push('colorado');
+  if (lat > 31.3 && lat < 37.0 && lng > -109.1 && lng < -103.0) regions.push('newmexico');
+  if (lat > 40.9 && lat < 45.0 && lng > -111.1 && lng < -104.0) regions.push('wyoming');
+  if (lat > 44.3 && lat < 49.0 && lng > -116.1 && lng < -104.0) regions.push('montana');
+  if (lat > 41.9 && lat < 49.0 && lng > -117.3 && lng < -111.0) regions.push('idaho');
+  if (lat > 54.5 && lat < 71.4 && lng > -170.0 && lng < -129.9) regions.push('alaska');
   // Canada
   if (lat > 42 && lat < 70 && lng > -141 && lng < -52) regions.push('canada');
   if (lat > 53.3 && lat < 53.8 && lng > -114.0 && lng < -113.2) regions.push('edmonton');
