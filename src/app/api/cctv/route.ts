@@ -566,6 +566,10 @@ const REGION_FETCHERS: Record<string, RegionFetcher> = Object.fromEntries(
 const REGION_BUDGET_MS = 12_000;
 // Florida, Georgia and Illinois page through thousands of records and take longer on a cold cache.
 const PAGED_REGION_BUDGET_MS = 30_000;
+// Mississippi harvests ~458 per-site pages per refresh: at the standard 12s
+// budget its refresh was abandoned every time, and on serverless the
+// abandoned work froze with the response, so the state never landed at all.
+const SLOW_REGIONS = new Set(['florida', 'georgia', 'illinois', 'mississippi']);
 
 /**
  * Regions are fetched a few at a time, not all forty-eight at once.
@@ -631,7 +635,7 @@ function refreshRegion(region: string): Promise<any[]> {
   if (existing) return existing;
 
   const started = regionPool.run(async () => {
-    const budgetMs = region === 'florida' || region === 'georgia' || region === 'illinois' ? PAGED_REGION_BUDGET_MS : REGION_BUDGET_MS;
+    const budgetMs = SLOW_REGIONS.has(region) ? PAGED_REGION_BUDGET_MS : REGION_BUDGET_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
     try {
@@ -797,7 +801,7 @@ async function collectRegions(regions: string[]): Promise<{ cameras: Record<stri
     .then(result => { if (result.length) cameras[region] = result; })
     .catch(() => { /* the cache logs it and keeps the last good index */ }));
 
-  const slowSingleRegion = missing.length === 1 && (missing[0] === 'florida' || missing[0] === 'georgia' || missing[0] === 'illinois');
+  const slowSingleRegion = missing.length === 1 && SLOW_REGIONS.has(missing[0]);
   const budget = Object.keys(cameras).length ? WARM_GRACE_MS : slowSingleRegion ? PAGED_REGION_BUDGET_MS : REGION_BUDGET_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>(resolve => { timer = setTimeout(resolve, budget); });

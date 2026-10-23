@@ -62,7 +62,8 @@ scanner_backend_backup.js
 *Manual*.md
 
 # Saved camera catalogue
-/.cache/
+/.cache/*
+!/.cache/cctv-catalog.json
 
 # Local checkouts of third-party tools; not part of this app
 /scratch/astra/

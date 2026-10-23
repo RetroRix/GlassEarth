@@ -25,6 +25,15 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['ws', 'onnxruntime-web'],
   outputFileTracingIncludes: {
     '/api/**': ['./node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs', './node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm'],
+    /* The committed camera-catalogue seed. Serverless filesystems are
+       per-instance and ephemeral, so the catalogue the route persists at
+       runtime can never survive there - every cold instance used to boot
+       empty and climb ~25k to ~31.5k over minutes, and regions whose
+       refresh cannot finish inside one invocation (Mississippi) never
+       landed at all. Shipping the snapshot the app itself writes means
+       every instance restores the same full catalogue at boot and
+       refreshes behind it; runtime writes still win on a writable disk. */
+    '/api/cctv': ['./.cache/cctv-catalog.json'],
   },
   transpilePackages: ['react-map-gl', 'mapbox-gl', 'maplibre-gl'],
   // Type errors block the build again. They were suppressed while 17 stood

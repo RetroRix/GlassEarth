@@ -28,7 +28,8 @@ const REGIONS = [
   { lat: 52.0,  lon:  22.0 }, // Eastern Europe / Baltics
   { lat: 39.0,  lon:  35.0 }, // Turkey / Aegean
   // Middle East & South Asia
-  { lat: 25.0,  lon:  45.0 }, // Arabian Gulf (Dubai/Riyadh)
+  { lat: 25.0,  lon:  49.0 }, // Arabian Gulf W (Riyadh/Doha)
+  { lat: 25.2,  lon:  55.3 }, // Arabian Gulf E (Dubai/Abu Dhabi)
   { lat: 22.0,  lon:  78.0 }, // India
   // East Asia & Pacific
   { lat: 35.0,  lon: 105.0 }, // China
@@ -109,26 +110,36 @@ const CALLSIGN_RE = /^[A-Z0-9]{3,8}$/;
 const JET_CRUISE_ALT_M = 8500;
 const JET_CRUISE_KTS = 300;
 
-// adsb.fi is the last free tar1090/ADSBexchange-v2 shaped feed still serving
-// data without an API key, so classifyFlight() works on it unchanged. The two
-// providers this route used to fan out to have both stopped returning aircraft:
-//   api.airplanes.live  → 403 on every endpoint (now key-gated)
-//   api.adsb.lol/v2     → 200 but always {"ac":[],"total":0}
+// Civil traffic comes from the community tar1090 feeds. Their health has
+// flipped more than once, so both working providers are wired and the
+// response reports per-feed counts — a provider that starts answering 200
+// with no aircraft must be visible in the payload, not silently empty the
+// map (which is exactly how this layer lost all civil traffic):
+//   api.adsb.lol/v2     → alive again (verified 2026-10-23: real civil
+//                         aircraft on every regional endpoint + /mil)
+//   opendata.adsb.fi    → alive; note its v2 regional payload keys the
+//                         aircraft array `aircraft`, not `ac` — reading
+//                         `ac` there returned [] forever (see fetch below)
+//   api.airplanes.live  → 403 on every endpoint (key-gated)
 //   api.adsb.one/v2     → 403 (checked as a replacement, also unusable)
-// Because both failure modes are silent (403 bodies are discarded, an empty
-// ac[] is indistinguishable from quiet airspace), the fallback path degraded to
-// zero aircraft without ever throwing. Provider counts are reported in the
-// response now so the next feed to die is visible instead of silent.
-const ADSB_MAX_DIST = 250; // nm — hard cap the provider enforces
+// OpenSky remains the best source *with* credentials; anonymously its
+// 400 credits/day pool cannot sustain a live map and datacenter IPs are
+// throttled out of it, so without credentials it is not called at all.
+const ADSB_MAX_DIST = 250; // nm — hard cap the providers enforce
 const ADSBFI_BASE = 'https://opendata.adsb.fi/api/v2';
+const ADSBLOL_BASE = 'https://api.adsb.lol/v2';
 
-// adsb.fi allows roughly one request per second and soft-throttles over that by
-// returning 200 with an empty ac[] rather than 429, so a parallel fanout looks
-// like it succeeded while returning nothing. The regional sweep is paced.
+// adsb.fi allows roughly one request per second and soft-throttles over
+// that by returning 200 with an empty array rather than 429, so it is the
+// per-region *fallback*, paced — never the parallel primary.
 const ADSBFI_GAP_MS = 1100;
 
-// adsb.fi serves /mil but returns 400 for /ladd, /pia and /squawk/{code},
-// so the global type feeds collapse to the military one.
+/** tar1090-shaped payloads key the aircraft array `ac` — except adsb.fi's
+    v2 regional endpoint, which uses `aircraft`. Accept both, always. */
+function acArray(data: any): any[] {
+  return data?.ac || data?.aircraft || [];
+}
+
 async function fetchAdsbFiRegion(lat: number, lon: number): Promise<any[]> {
   try {
     const res = await stealthFetch(`${ADSBFI_BASE}/lat/${lat}/lon/${lon}/dist/${ADSB_MAX_DIST}`, {
@@ -136,7 +147,21 @@ async function fetchAdsbFiRegion(lat: number, lon: number): Promise<any[]> {
     });
     if (res.ok) {
       const data = await res.json();
-      return data.ac || [];
+      return acArray(data);
+    }
+    await res.body?.cancel();
+  } catch {}
+  return [];
+}
+
+async function fetchAdsbLolRegion(lat: number, lon: number): Promise<any[]> {
+  try {
+    const res = await stealthFetch(`${ADSBLOL_BASE}/lat/${lat}/lon/${lon}/dist/${ADSB_MAX_DIST}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return acArray(data);
     }
     await res.body?.cancel();
   } catch {}
@@ -321,12 +346,17 @@ export async function GET() {
     const seenHex = new Set<string>();
     let source: string;
 
-    // ── Phase 1 + 2 in parallel: global military feed AND OpenSky simultaneously ──
-    // Running them together keeps total wall-clock time to max(mil_feed, opensky)
-    // instead of sum. The military feed runs every cycle regardless of OpenSky
-    // status and is always current, so military traffic stays live even while an
-    // anonymous OpenSky snapshot is waiting out its interval.
+    // ── Phase 1 + 2 in parallel: global military feeds AND OpenSky ──────────
+    // The military feeds run every cycle regardless of OpenSky status and
+    // are always current, so military traffic stays live even while an
+    // OpenSky snapshot is waiting out its interval.
+    // OpenSky is only called with credentials: anonymously, datacenter IPs
+    // are throttled out of its 400 credits/day pool within the first hour,
+    // after which every call 429s or hangs — it contributed zero aircraft
+    // and up to 30s of latency. The community sweep below is the civil
+    // source of record until OPENSKY_CLIENT_ID/SECRET are configured.
     const skipOpenSky =
+      !hasOpenSkyCreds() ||
       Date.now() < openSkyCooldownUntil ||
       Date.now() - osSnapshotTime < openSkyInterval();
     const token = skipOpenSky ? null : await getOpenSkyToken();
@@ -334,10 +364,11 @@ export async function GET() {
       ? { signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${token}` } }
       : { signal: AbortSignal.timeout(30000) };
 
-    const [milRes, osRes] = await Promise.allSettled([
+    const [milRes, milLolRes, osRes] = await Promise.allSettled([
       stealthFetch(`${ADSBFI_BASE}/mil`, { signal: AbortSignal.timeout(15000) }),
+      stealthFetch(`${ADSBLOL_BASE}/mil`, { signal: AbortSignal.timeout(15000) }),
       skipOpenSky
-        ? Promise.reject(new Error('OpenSky in cooldown'))
+        ? Promise.reject(new Error('OpenSky not configured / in cooldown'))
         // extended=1 appends the ADS-B emitter category as an 18th field. Without
         // it the state vector is 17 long and s[17] below is silently undefined,
         // which is what made every category_os test in classifyFlight() dead.
@@ -345,18 +376,20 @@ export async function GET() {
         : stealthFetch('https://opensky-network.org/api/states/all?extended=1', osInit),
     ]);
 
-    // Drain the military feed — parse on ok, discard the body otherwise to free the connection.
-    if (milRes.status === 'fulfilled') {
-      if (milRes.value.ok) {
-        try {
-          const data = await milRes.value.json();
-          ingestAc(data.ac || [], allRaw, seenHex);
-        } catch (e) {
-          console.warn('[OSIRIS] adsb.fi mil parse error:', e);
+    // Drain the military feeds — parse on ok, discard the body otherwise to free the connection.
+    for (const [label, r] of [['adsb.fi', milRes], ['adsb.lol', milLolRes]] as const) {
+      if (r.status === 'fulfilled') {
+        if (r.value.ok) {
+          try {
+            const data = await r.value.json();
+            ingestAc(acArray(data), allRaw, seenHex);
+          } catch (e) {
+            console.warn(`[OSIRIS] ${label} mil parse error:`, e);
+          }
+        } else {
+          console.warn(`[OSIRIS] ${label} mil feed returned`, r.value.status);
+          await r.value.body?.cancel();
         }
-      } else {
-        console.warn('[OSIRIS] adsb.fi mil feed returned', milRes.value.status);
-        await milRes.value.body?.cancel();
       }
     }
     const milCount = allRaw.length;
@@ -399,31 +432,49 @@ export async function GET() {
     ingestAc(osSnapshot, allRaw, seenHex);
     const openSkyWorked = osSnapshot.length > 0;
 
-    // ── Phase 3: Regional sweep — last resort only ────────────────────────────
-    // Runs only when there is no OpenSky snapshot at all, never as the steady
-    // state. adsb.fi's geographic endpoint is metered far more tightly than its
-    // /mil feed and answers 200 with an empty ac[] once that budget is spent
-    // rather than 429, so sweeping it every cycle would quietly exhaust it and
-    // look like empty airspace. Paced at ~1 req/s; 30 regions ≈ 33s, inside the
-    // 60s maxDuration above.
+    // ── Phase 3: community regional sweep — the civil source ────────────────
+    // Runs whenever there is no OpenSky snapshot (i.e. always, until
+    // credentials are configured). adsb.lol tolerates a modest parallel
+    // fan-out (verified: 4-concurrent regional calls all answer 200 with
+    // real traffic), so the 30 regions sweep through a small pool instead
+    // of the old serial march that alone could eat the whole invocation.
+    // A region adsb.lol answers empty gets one paced adsb.fi attempt —
+    // the two networks' feeder coverage differs, and an empty region is
+    // either quiet airspace or a dead provider; the fallback distinguishes
+    // them often enough to be worth its ~1s.
+    let lolCount = 0;
+    let fiRegionalCount = 0;
     if (!openSkyWorked) {
-      source = 'regional';
-      console.warn('[OSIRIS] no OpenSky snapshot — falling back to adsb.fi regional sweep');
+      source = 'community';
+      const before = allRaw.length;
+      const emptyRegions: { lat: number; lon: number }[] = [];
+      const POOL = 5;
+      for (let i = 0; i < REGIONS.length; i += POOL) {
+        const batch = REGIONS.slice(i, i + POOL);
+        const results = await Promise.all(batch.map(r => fetchAdsbLolRegion(r.lat, r.lon)));
+        results.forEach((ac, j) => {
+          if (ac.length) ingestAc(ac, allRaw, seenHex);
+          else emptyRegions.push(batch[j]);
+        });
+      }
+      lolCount = allRaw.length - before;
 
-      for (const r of REGIONS) {
+      for (const r of emptyRegions) {
+        const beforeFi = allRaw.length;
         ingestAc(await fetchAdsbFiRegion(r.lat, r.lon), allRaw, seenHex);
+        fiRegionalCount += allRaw.length - beforeFi;
         await new Promise(resolve => setTimeout(resolve, ADSBFI_GAP_MS));
       }
 
       if (allRaw.length === 0) {
         console.error(
           '[OSIRIS] every flight provider returned zero aircraft — ' +
-          'set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET (free at opensky-network.org); ' +
-          'the anonymous 400 credits/day pool cannot sustain a live map'
+          'set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET (free at opensky-network.org) ' +
+          'for an authenticated primary source'
         );
       }
     } else {
-      source = hasOpenSkyCreds() ? 'opensky-auth' : 'opensky-anon';
+      source = 'opensky-auth';
     }
 
     // ── Classify ──────────────────────────────────────────────────────────────
@@ -461,7 +512,8 @@ export async function GET() {
       // is visible in the payload rather than silently emptying the map.
       providers: {
         adsbfi_mil:      milCount,
-        adsbfi_regional: openSkyWorked ? 0 : allRaw.length - milCount,
+        adsblol:         lolCount,
+        adsbfi_regional: fiRegionalCount,
         opensky:         osSnapshot.length,
         opensky_auth:    hasOpenSkyCreds(),
         opensky_age_s:   osSnapshotTime ? Math.round((Date.now() - osSnapshotTime) / 1000) : null,

@@ -34,8 +34,10 @@ const SITES_URL = `${BASE}/default.aspx/LoadCameraData`;
 const MS_BOUNDS = { minLat: 30.1, maxLat: 35.0, minLng: -91.7, maxLng: -88.1 };
 
 /** Site pages fetched at once. The host answers in ~1s and tolerates this
-    comfortably; more only bought throttling. */
-const CONCURRENCY = 12;
+    comfortably; more only bought throttling. (Raised 12 → 20 in the
+    serverless fix: the whole harvest must fit inside one 60s invocation,
+    and at 12 the tail of the fan-out routinely outlived it.) */
+const CONCURRENCY = 20;
 
 /** One site marker from LoadCameraData's `d` array. */
 export interface MdotSite {

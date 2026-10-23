@@ -17,6 +17,14 @@ export const dynamic = 'force-dynamic';
  *
  * The TLE catalogue is the disk cache the satellites route already maintains.
  * Reading it here avoids a second fetch to CelesTrak, which rate-limits.
+ *
+ * On Vercel that disk cache does not exist on this route's instance — the
+ * filesystem is per-instance and ephemeral, and the satellites route's writes
+ * land on whichever instance served *it*. The catalogue therefore read as
+ * empty in production and every orbit 404'd. Fallback: resolve the one TLE
+ * asked for straight from CelesTrak's per-satellite GP endpoint (a single
+ * three-line document, cached in memory) and only 404 when CelesTrak itself
+ * has no such object.
  */
 
 const CACHE_FILE = join(process.cwd(), '.next', 'cache', 'satellites-tle-cache.json');
@@ -49,6 +57,37 @@ function catalogue(): Map<string, Tle> {
   return byNorad;
 }
 
+/** Per-satellite TLEs resolved from CelesTrak, keyed by NORAD id. A null is a
+    remembered miss, so an unknown id does not re-fetch on every click. */
+const remoteCache = new Map<string, { tle: Tle | null; at: number }>();
+const REMOTE_TTL_MS = 30 * 60_000;
+
+async function tleFromCelesTrak(id: string): Promise<Tle | null> {
+  const hit = remoteCache.get(id);
+  if (hit && Date.now() - hit.at < REMOTE_TTL_MS) return hit.tle;
+  let tle: Tle | null = null;
+  try {
+    const res = await fetch(
+      `https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(id)}&FORMAT=TLE`,
+      { signal: AbortSignal.timeout(12000), headers: { Accept: 'text/plain' } },
+    );
+    if (res.ok) {
+      const lines = (await res.text()).split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0);
+      const i1 = lines.findIndex(l => l.startsWith('1 '));
+      const i2 = lines.findIndex(l => l.startsWith('2 '));
+      if (i1 >= 0 && i2 > i1) {
+        tle = { name: (lines[i1 - 1] ?? '').trim(), line1: lines[i1], line2: lines[i2] };
+      }
+    } else {
+      await res.body?.cancel();
+    }
+  } catch {
+    // CelesTrak unreachable: the caller 404s, as it did for an empty catalogue.
+  }
+  remoteCache.set(id, { tle, at: Date.now() });
+  return tle;
+}
+
 /**
  * The moment the track is drawn around.
  *
@@ -77,7 +116,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'numeric NORAD id required' }, { status: 400 });
   }
 
-  const tle = catalogue().get(String(Number(id)));
+  const tle = catalogue().get(String(Number(id))) ?? (await tleFromCelesTrak(String(Number(id))));
   if (!tle) {
     return NextResponse.json({ error: 'not in catalogue', noradId: id }, { status: 404 });
   }

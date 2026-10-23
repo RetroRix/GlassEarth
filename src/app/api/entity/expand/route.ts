@@ -1,25 +1,21 @@
 import { NextResponse } from 'next/server';
 import { isRateLimited, getClientIp } from '@/lib/ssrf-guard';
+import { ALLOWED_TYPES, cleanText, normalizeId, resolveEntity, wdCache } from '@/lib/intel';
 
 export const dynamic = 'force-dynamic';
+// A cold resolve fans out to Wikidata/RIPEstat; the IP path's four lookups
+// now run in parallel, but a slow SPARQL still needs the headroom.
+export const maxDuration = 60;
 
 /**
- * Thin proxy to the OSIRIS Intelligence Layer (osiris-intel).
+ * Entity graph expansion — resolved in-process by `@/lib/intel`.
  *
- * In Docker: fetches from http://osiris-intel:4000/resolve
- * In dev:    fetches from http://localhost:4000/resolve
- *
- * All intelligence logic lives in the intel container — this route
- * just validates the request and forwards it.
+ * This route used to proxy to a separate Express service (osiris-intel,
+ * `intel/` in the repo) at INTEL_URL. That service was never deployed
+ * alongside the Vercel app, so every call 502'd. The resolvers are
+ * framework-free and keyless, so they were ported into the app itself;
+ * the response shape and cache semantics are the sidecar's, unchanged.
  */
-
-const INTEL_URL = process.env.INTEL_URL || (
-  process.env.NODE_ENV === 'production'
-    ? 'http://osiris-intel:4000'
-    : 'http://localhost:4000'
-);
-
-const ALLOWED_TYPES = new Set(['aircraft', 'vessel', 'company', 'person', 'ip', 'country']);
 
 export async function GET(req: Request) {
   const clientIp = getClientIp(req);
@@ -29,7 +25,7 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const type = (searchParams.get('type') || '').toLowerCase().trim();
-  const id = (searchParams.get('id') || '').trim();
+  const rawId = (searchParams.get('id') || '').trim();
 
   if (!type || !ALLOWED_TYPES.has(type)) {
     return NextResponse.json(
@@ -37,40 +33,49 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
-  if (!id || id.length < 2 || id.length > 200) {
+  if (!rawId || rawId.length < 2 || rawId.length > 200) {
     return NextResponse.json({ error: 'Invalid id (2-200 chars)' }, { status: 400 });
   }
 
-  try {
-    const params = new URLSearchParams({ type, id });
-    // Forward extra aircraft properties to the intel brain
-    for (const key of ['registration', 'model', 'icao24']) {
-      const val = searchParams.get(key);
-      if (val) params.set(key, val);
-    }
-    const res = await fetch(`${INTEL_URL}/resolve?${params}`, {
-      signal: AbortSignal.timeout(15000),
-      headers: { 'X-Forwarded-For': clientIp },
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return NextResponse.json(
-        { error: body.error || `Intel layer returned ${res.status}`, nodes: [], links: [] },
-        { status: res.status },
-      );
-    }
-
-    const data = await res.json();
-    return NextResponse.json(data, {
-      // A partial graph (a provider did not answer) must not sit in a shared cache for an hour.
-      headers: { 'Cache-Control': data.degraded ? 'no-store' : 'public, s-maxage=3600, stale-while-revalidate=7200' },
-    });
-  } catch (e) {
-    console.error('[OSIRIS] Intel proxy error:', e instanceof Error ? e.message : e);
+  const id = normalizeId(type, rawId);
+  if (!id || id.length < 2) {
     return NextResponse.json(
-      { error: 'Intelligence layer unavailable', nodes: [], links: [] },
-      { status: 502 },
+      { error: type === 'ip' ? 'Not an IPv4 or IPv6 address' : 'ID contains too many invalid characters' },
+      { status: 400 },
+    );
+  }
+
+  try {
+    // Extra aircraft properties, as the map's entity clicks supply them.
+    const props: { registration?: string; model?: string; icao24?: string } = {};
+    const registration = searchParams.get('registration');
+    const model = searchParams.get('model');
+    const icao24 = searchParams.get('icao24');
+    if (registration) props.registration = normalizeId('aircraft', registration) || '';
+    if (model) props.model = cleanText(model).slice(0, 100);
+    if (icao24) props.icao24 = normalizeId('aircraft', icao24) || '';
+
+    const result = await resolveEntity(type, id, props);
+    return NextResponse.json(
+      {
+        nodes: result.nodes,
+        links: result.links,
+        degraded: result.degraded,
+        entity: { type, id },
+        source: 'OSIRIS Intelligence Layer',
+        wikidata_cache_hits: wdCache.size,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        // A partial graph (a provider did not answer) must not sit in a shared cache for an hour.
+        headers: { 'Cache-Control': result.degraded ? 'no-store' : 'public, s-maxage=3600, stale-while-revalidate=7200' },
+      },
+    );
+  } catch (e) {
+    console.error('[OSIRIS] Intel resolve error:', e instanceof Error ? e.message : e);
+    return NextResponse.json(
+      { error: 'Resolution failed', nodes: [], links: [] },
+      { status: 500 },
     );
   }
 }

@@ -3,7 +3,8 @@ import WebSocket from 'ws';
 
 /**
  * OSIRIS — Maritime Intelligence
- * Real-time AIS vessel tracking via aisstream.io + Static global ports.
+ * Real-time AIS vessel tracking via Digitraffic (keyless, Baltic) and
+ * aisstream.io (when AIS_API_KEY is configured) + static global ports.
  */
 
 const PORTS = [
@@ -215,6 +216,100 @@ async function fetchVesselApiFallback() {
   // Mock data removed per user request. We only rely on real live stream data.
 }
 
+/* ── Digitraffic AIS (Finnish Transport Infrastructure Agency) ────────────
+   Keyless open AIS for the Baltic / Northern European waters, published as
+   two GeoJSON/JSON documents: vessel positions (~1,000 live ships) and
+   vessel metadata (name, destination, ship type). This is the maritime
+   layer's always-on live source: the aisstream.io feed above only flows
+   when AIS_API_KEY is configured, and a WebSocket cache cannot accumulate
+   on serverless anyway, which left total_ships permanently 0. Digitraffic
+   coverage is regional — the Gulf of Finland / Baltic approaches — and the
+   payload says so via ship_sources; global coverage still wants the
+   aisstream key. Fetched at most once a minute, shared between callers. */
+const DIGITRAFFIC_TTL_MS = 60_000;
+
+const globalForDigitraffic = globalThis as unknown as {
+  digitrafficShips?: Map<number, any>;
+  digitrafficAt?: number;
+  digitrafficInflight?: Promise<void> | null;
+};
+
+function digitrafficShipType(typeCode: number | undefined): string {
+  if (!typeCode) return 'cargo';
+  if (typeCode >= 80 && typeCode <= 89) return 'tanker';
+  if (typeCode >= 70 && typeCode <= 79) return 'cargo';
+  if (typeCode === 35) return 'military';
+  if (typeCode >= 60 && typeCode <= 69) return 'passenger';
+  if (typeCode >= 30 && typeCode <= 39) return 'fishing';
+  return 'cargo';
+}
+
+async function refreshDigitraffic(): Promise<void> {
+  const [locRes, vesRes] = await Promise.allSettled([
+    fetch('https://meri.digitraffic.fi/api/ais/v1/locations', {
+      signal: AbortSignal.timeout(20000),
+      headers: { Accept: 'application/json' },
+    }),
+    fetch('https://meri.digitraffic.fi/api/ais/v1/vessels', {
+      signal: AbortSignal.timeout(20000),
+      headers: { Accept: 'application/json' },
+    }),
+  ]);
+  if (locRes.status !== 'fulfilled' || !locRes.value.ok) {
+    throw new Error(`Digitraffic locations ${locRes.status === 'fulfilled' ? locRes.value.status : 'failed'}`);
+  }
+  const loc = await locRes.value.json();
+  const meta = new Map<number, any>();
+  if (vesRes.status === 'fulfilled' && vesRes.value.ok) {
+    for (const v of await vesRes.value.json()) {
+      if (typeof v?.mmsi === 'number') meta.set(v.mmsi, v);
+    }
+  }
+
+  const ships = new Map<number, any>();
+  for (const f of loc.features ?? []) {
+    const mmsi = f?.mmsi ?? f?.properties?.mmsi;
+    const coords = f?.geometry?.coordinates;
+    if (typeof mmsi !== 'number' || !Array.isArray(coords)) continue;
+    const [lng, lat] = coords;
+    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+    const p = f.properties ?? {};
+    const v = meta.get(mmsi);
+    ships.set(mmsi, {
+      id: mmsi,
+      mmsi,
+      name: v?.name ? String(v.name).trim() : undefined,
+      destination: v?.destination ? String(v.destination).trim() : undefined,
+      type: digitrafficShipType(v?.shipType),
+      lat,
+      lng,
+      speed: typeof p.sog === 'number' ? p.sog : 0,
+      // AIS heading 511 means "not available" — fall back to course over ground.
+      heading: typeof p.heading === 'number' && p.heading !== 511 ? p.heading : (p.cog ?? 0),
+      timestamp: typeof p.timestampExternal === 'number' ? p.timestampExternal * 1000 : Date.now(),
+      source: 'digitraffic',
+    });
+  }
+  if (ships.size > 0) {
+    globalForDigitraffic.digitrafficShips = ships;
+    globalForDigitraffic.digitrafficAt = Date.now();
+  }
+}
+
+async function ensureDigitraffic(): Promise<void> {
+  // Tests seed the Digitraffic map directly (see route.test.ts): a live
+  // fetch here would hang under their fake timers — AbortSignal.timeout is
+  // timer-driven — and would leak real Baltic ships into hermetic cases.
+  if (process.env.NODE_ENV === 'test') return;
+  const at = globalForDigitraffic.digitrafficAt ?? 0;
+  if (globalForDigitraffic.digitrafficShips?.size && Date.now() - at < DIGITRAFFIC_TTL_MS) return;
+  if (globalForDigitraffic.digitrafficInflight) return globalForDigitraffic.digitrafficInflight;
+  globalForDigitraffic.digitrafficInflight = refreshDigitraffic()
+    .catch(e => { console.warn('[OSIRIS] Digitraffic AIS refresh failed:', e); })
+    .finally(() => { globalForDigitraffic.digitrafficInflight = null; });
+  return globalForDigitraffic.digitrafficInflight;
+}
+
 /* ── Response snapshot cache ──────────────────────────────────────────────
    The AIS websocket writes into shipsCache continuously, so a GET is pure
    aggregation over whatever that map happens to hold. Rebuilding it per
@@ -242,7 +337,19 @@ function buildSnapshot(now: number): string {
     }
   }
 
-  const ships = Array.from(shipsCache.values());
+  // aisstream ships (only present when AIS_API_KEY is configured) plus the
+  // keyless Digitraffic Baltic feed, deduped by MMSI with aisstream winning.
+  const byMmsi = new Map<number, any>();
+  for (const ship of shipsCache.values()) byMmsi.set(ship.mmsi, ship);
+  for (const ship of globalForDigitraffic.digitrafficShips?.values() ?? []) {
+    if (now - ship.timestamp > 10 * 60 * 1000) continue;
+    if (!byMmsi.has(ship.mmsi)) byMmsi.set(ship.mmsi, ship);
+  }
+  const ships = Array.from(byMmsi.values());
+  const shipSources = {
+    aisstream: ships.filter(s => s.source !== 'digitraffic').length,
+    digitraffic: ships.filter(s => s.source === 'digitraffic').length,
+  };
 
   // Dynamically calculate live traffic (Fast approximation of Haversine)
   const getDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
@@ -309,6 +416,7 @@ function buildSnapshot(now: number): string {
     ports: dynamicPorts,
     chokepoints: dynamicChokepoints,
     ships: ships,
+    ship_sources: shipSources,
     total_ports: dynamicPorts.length,
     total_chokepoints: dynamicChokepoints.length,
     total_ships: ships.length,
@@ -324,6 +432,8 @@ export function clearMaritimeSnapshot(): void {
 export async function GET() {
   // Trigger Hybrid Fallback
   await fetchVesselApiFallback();
+  // Keyless live AIS (Baltic) — the layer's baseline live source.
+  await ensureDigitraffic();
 
   const now = Date.now();
   const cached = globalForSnapshot.maritimeSnapshot;
