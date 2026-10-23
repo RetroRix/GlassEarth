@@ -152,6 +152,61 @@ body.theme-ghost {
   --font-mono: var(--font-hud);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   THEME: DAY (LIGHT OPS)
+   The first-run landing theme: light chrome over CARTO's Positron
+   basemap (OsirisMap picks the basemap from the theme). Core and
+   Ghost stay the dark looks; a saved Style Studio customisation is
+   inline on <body> and still wins over everything here. Only tokens
+   the token engine owns are set, and the satellite map colours are
+   left at their defaults for the same reason Ghost leaves them:
+   they are the feed's own mission colours.
+   ═══════════════════════════════════════════════════════════════ */
+body.theme-day {
+  --gold-rgb: 168, 134, 28;
+  --cyan-rgb: 0, 126, 163;
+  --bg-void: #ECEEF1;
+  --bg-primary: #F7F8FA;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #E2E5EA;
+  --bg-panel: rgba(255, 255, 255, 0.88);
+  --bg-panel-solid: #FFFFFF;
+
+  --gold-primary: #A8861C;
+  --gold-light: #D4AF37;
+  --gold-dim: #6E5616;
+  --gold-glow: rgba(var(--gold-rgb), 0.25);
+
+  --cyan-primary: #007EA3;
+  --cyan-dim: #00566E;
+  --cyan-glow: rgba(var(--cyan-rgb), 0.15);
+
+  --border-primary: rgba(var(--gold-rgb), 0.28);
+  --border-secondary: rgba(var(--gold-rgb), 0.14);
+  --border-active: rgba(var(--gold-rgb), 0.55);
+  --border-cyan: rgba(var(--cyan-rgb), 0.3);
+
+  --text-primary: #1C1E24;
+  --text-secondary: #4C5158;
+  --text-muted: #878C94;
+  --text-heading: #101216;
+  --text-gold: #A8861C;
+  --text-cyan: #007EA3;
+
+  --scrollbar-thumb: rgba(var(--gold-rgb), 0.3);
+  --scrollbar-thumb-hover: rgba(var(--gold-rgb), 0.5);
+  --hover-accent: rgba(var(--gold-rgb), 0.08);
+
+  /* The core flight/camera colours are neon-on-black; on Positron's
+     pale ground they wash out, so the day theme darkens them to the
+     same hues at print weight. */
+  --map-cctv: #00A152;
+  --map-flight-civil: #0288D1;
+  --map-flight-private: #B8860B;
+  --map-flight-gov: #E65100;
+  --map-flight-unknown: #546E7A;
+}
+
 /* ── Base ── */
 * { box-sizing: border-box; }
 

@@ -447,7 +447,14 @@ export default function Dashboard() {
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [drawnPolygons, setDrawnPolygons] = useState<DrawnShape[]>([]);
   const [demoMode, setDemoMode] = useState(false);
-  const [osirisTheme, setOsirisTheme] = useState<'core'|'ghost'>('core');
+  /* First run lands on the DAY theme (light chrome, light basemap):
+     visitors said the dark landing was hard to navigate. A saved Style
+     Studio customisation was composed against the dark look, so when one
+     exists the app still opens on CORE and the saved tokens are applied
+     over it below — the stored choice wins, untouched. */
+  const [osirisTheme, setOsirisTheme] = useState<'core'|'ghost'|'day'>(() => {
+    try { return loadSavedSettings() ? 'core' : 'day'; } catch { return 'day'; }
+  });
 
   useEffect(() => {
     document.body.className = osirisTheme === 'core' ? '' : `theme-${osirisTheme}`;

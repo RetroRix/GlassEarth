@@ -77,7 +77,7 @@ interface OsirisMapProps {
   mapStyle?: string;
   scanTargets?: any[];
   demoMode?: boolean;
-  theme?: 'core' | 'ghost';
+  theme?: 'core' | 'ghost' | 'day';
   drawnPolygons?: Array<{ id: string; name: string; geojson: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.LineString>; color: string }>;
   arcgisLayers?: Array<{ id: string; title: string; geojson: any; color?: string; opacity?: number }>;
   /** Active draw mode, or null when not drawing. */
@@ -353,8 +353,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     
-    // Select basemap style
-    const styleUrl = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+    // Select basemap style. The DAY theme pairs with CARTO Positron —
+    // the light sibling of the dark-matter style, same CDN and proxy —
+    // so a first-run visitor lands on a light map under the light
+    // chrome. The map is keyed by theme in page.tsx, so a theme swap
+    // remounts it and this choice is re-made with the new theme.
+    const styleUrl = theme === 'day'
+      ? 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+      : 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
     const container = containerRef.current;
     maplibregl.setWorkerUrl(`/vendor/maplibre/${maplibregl.getVersion()}/maplibre-gl-worker.mjs`);
