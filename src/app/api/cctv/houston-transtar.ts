@@ -62,10 +62,17 @@ export const fetchHoustonTranstarIndex = cachedSource('houstontranstar:index', a
   const home = await fetchPage(`${BASE}/mobile/itranstar_cctv.aspx`);
   const roads = parseTranstarRoads(home);
   if (roads.length < 20) throw new Error('Houston TranStar road list is incomplete');
-  const pages = await Promise.all(roads.map(async road => ({
+  /* One slow roadway page must not take the whole index down with it:
+     Promise.all made any single 8s timeout fatal, which is how Houston
+     (and Yoakum, which joins through this index) kept vanishing from the
+     catalogue whenever TranStar was having a slow minute. Settle every
+     page, keep what answered, and let the ≥300 completeness guard below
+     judge what landed. */
+  const settled = await Promise.allSettled(roads.map(async road => ({
     road,
     html: await fetchPage(`${BASE}/mobile/itranstar_cctv.aspx?roadway=${encodeURIComponent(road)}`),
   })));
+  const pages = settled.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
   const cameras = pages.flatMap(page => parseTranstarCameras(page.road, page.html));
   if (cameras.length < 300) throw new Error('Houston TranStar camera list is incomplete');
   return cameras;
