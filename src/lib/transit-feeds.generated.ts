@@ -2682,23 +2682,23 @@ export const TRANSIT_FEEDS: TransitFeed[] = [
     "region": "El Paso",
     "url": "https://data.peaktransit.com/gtfsrt/193/VehiclePosition.pb",
     "bbox": [
-      51.6293,
-      22.9433,
-      55.924,
-      24.7483
+      -106.6543,
+      31.4463,
+      -106.0877,
+      32.0187
     ],
     "center": [
-      53.7767,
-      23.8458
+      -106.2483,
+      31.6847
     ],
     "core": [
-      51.6293,
-      22.9433,
-      55.924,
-      24.7483
+      -106.6243,
+      31.5691,
+      -106.1211,
+      31.9887
     ],
     "mdb": "3204",
-    "vehiclesAtProbe": 0
+    "vehiclesAtProbe": 10
   },
   {
     "id": "emery-go-round",

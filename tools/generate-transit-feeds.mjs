@@ -62,6 +62,15 @@ const EXTRA = [
   // among Texas metros — had no live transit. Probed 2026-10-23: keyless,
   // 56 vehicles in the El Paso bbox. Hosted by a third party (no SLA).
   { provider: 'Sun Metro (El Paso)', country: 'US', region: 'El Paso', url: 'https://hwmftxz4dc.execute-api.us-east-1.amazonaws.com/gtfsrt/gtfsvp', license: 'https://elpasotexas.gov/sun-metro' },
+  // The Mobility Database's recorded bbox for the county operator's static
+  // source is a Persian Gulf box (extracted 2022, plainly wrong — the static
+  // zip itself is entirely El Paso County). The catalogue build unions that
+  // box in, and a probe that happens to see no buses falls back to it
+  // wholesale, which parked this live feed on the wrong continent and gave
+  // El Paso zero transit. Pin the real service area so regeneration cannot
+  // regress it: live-probed extent (2026-10-23) unioned with the static
+  // feed's stop extent.
+  { provider: 'El Paso Transportation Authority', country: 'US', region: 'El Paso', area: [-106.6543, 31.4463, -106.0877, 32.0187], url: 'https://data.peaktransit.com/gtfsrt/193/VehiclePosition.pb' },
   { provider: 'CapMetro (Austin)', country: 'US', url: 'https://data.texas.gov/download/eiei-9rpf/application%2Foctet-stream', license: 'https://www.capmetro.org/developertools' },
   { provider: 'Metro Transit (Minneapolis–St Paul)', country: 'US', url: 'https://svc.metrotransit.org/mtgtfs/vehiclepositions.pb', license: 'https://svc.metrotransit.org/' },
   { provider: 'MBTA (Boston)', country: 'US', url: 'https://cdn.mbta.com/realtime/VehiclePositions.pb', license: 'https://www.mbta.com/developers', static: ['https://cdn.mbta.com/MBTA_GTFS.zip'] },
