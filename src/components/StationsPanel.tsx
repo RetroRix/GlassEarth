@@ -60,6 +60,10 @@ export default function StationsPanel({ onClose, onPlayRadio, currentRadioUuid, 
   const [sliceMode, setSliceMode] = useState<'country' | 'category'>('country');
   const [country, setCountry] = useState('US');
   const [category, setCategory] = useState<string>('news');
+  /* Picker lists start from the lib snapshot and are replaced by the
+     directory's own lists when the first slice response carries them. */
+  const [tvCountries, setTvCountries] = useState(TV_COUNTRIES);
+  const [tvCategories, setTvCategories] = useState<readonly string[]>(TV_CATEGORIES);
   const [channels, setChannels] = useState<TvChannel[]>([]);
   const [tvLoading, setTvLoading] = useState(false);
   const [tvError, setTvError] = useState<string | null>(null);
@@ -72,7 +76,7 @@ export default function StationsPanel({ onClose, onPlayRadio, currentRadioUuid, 
 
   /* ── Radio state ── */
   const [radioMode, setRadioMode] = useState<'top' | 'country' | 'tag' | 'search'>('top');
-  const [radioCountry, setRadioCountry] = useState('United States');
+  const [radioCountry, setRadioCountry] = useState('US');
   const [radioTag, setRadioTag] = useState<string>('news');
   const [radioQuery, setRadioQuery] = useState('');
   const [stations, setStations] = useState<RadioStation[]>([]);
@@ -95,6 +99,8 @@ export default function StationsPanel({ onClose, onPlayRadio, currentRadioUuid, 
       .then(d => {
         if (cancelled) return;
         setChannels(Array.isArray(d.channels) ? d.channels : []);
+        if (Array.isArray(d.countries) && d.countries.length) setTvCountries(d.countries);
+        if (Array.isArray(d.categories) && d.categories.length) setTvCategories(d.categories);
         if (d.error) setTvError(d.error);
       })
       .catch(() => { if (!cancelled) setTvError('TV directory unavailable'); })
@@ -225,11 +231,11 @@ export default function StationsPanel({ onClose, onPlayRadio, currentRadioUuid, 
               <button onClick={() => setSliceMode('category')} className={`${chip} ${sliceMode === 'category' ? chipActive : chipIdle}`}>By category</button>
               {sliceMode === 'country' ? (
                 <select value={country} onChange={e => setCountry(e.target.value)} className={selectCls} aria-label="TV country">
-                  {TV_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  {tvCountries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                 </select>
               ) : (
                 <select value={category} onChange={e => setCategory(e.target.value)} className={selectCls} aria-label="TV category">
-                  {TV_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  {tvCategories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               )}
               <button onClick={() => setTvFavsOnly(v => !v)} className={`${chip} flex items-center gap-1.5 ${tvFavsOnly ? chipActive : chipIdle}`}>
@@ -301,7 +307,7 @@ export default function StationsPanel({ onClose, onPlayRadio, currentRadioUuid, 
               <button onClick={() => setRadioMode('search')} className={`${chip} ${radioMode === 'search' ? chipActive : chipIdle}`}>Search</button>
               {radioMode === 'country' && (
                 <select value={radioCountry} onChange={e => setRadioCountry(e.target.value)} className={selectCls} aria-label="Radio country">
-                  {TV_COUNTRIES.map(c => <option key={c.code} value={c.name}>{c.name}</option>)}
+                  {tvCountries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                 </select>
               )}
               {radioMode === 'tag' && (

@@ -84,7 +84,12 @@ export async function GET(req: NextRequest) {
   let path: string;
   switch (mode) {
     case 'country':
-      path = `stations/bycountry/${encodeURIComponent(q)}?${common}&order=votes&reverse=true&limit=${limit}`;
+      /* A 2-letter code goes to the exact-code endpoint (Radio Browser's
+         robust path — the exact-name endpoint returned zero for the
+         United States in live testing); anything else is a name search. */
+      path = /^[A-Za-z]{2}$/.test(q)
+        ? `stations/bycountrycodeexact/${encodeURIComponent(q.toLowerCase())}?${common}&order=votes&reverse=true&limit=${limit}`
+        : `stations/bycountry/${encodeURIComponent(q)}?${common}&order=votes&reverse=true&limit=${limit}`;
       break;
     case 'tag':
       path = `stations/bytag/${encodeURIComponent(q.toLowerCase())}?${common}&order=votes&reverse=true&limit=${limit}`;

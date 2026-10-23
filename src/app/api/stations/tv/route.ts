@@ -19,7 +19,48 @@ import { TV_CATEGORIES, TV_COUNTRIES, parseM3u } from '@/lib/stations';
 export const dynamic = 'force-dynamic';
 
 const PLAYLIST_BASE = 'https://iptv-org.github.io/iptv';
+const API_BASE = 'https://iptv-org.github.io/api';
 const CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' };
+
+/**
+ * The picker lists are IPTV-org's own, fetched from their JSON API and
+ * normalised — hard-coded lists drift as they add countries and
+ * categories. Any failure falls back to the snapshot in lib/stations.
+ */
+async function directoryMeta(): Promise<{ countries: { code: string; name: string }[]; categories: string[] }> {
+  let countries = [...TV_COUNTRIES];
+  let categories: string[] = [...TV_CATEGORIES];
+  try {
+    const res = await fetch(`${API_BASE}/countries.json`, {
+      headers: { 'User-Agent': 'GlassEarth/1.0 (https://www.glassearthlive.com)' },
+      next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const raw = (await res.json()) as { code?: string; name?: string }[];
+      const list = raw
+        .filter(c => c.code && c.name)
+        .map(c => ({ code: c.code!.toUpperCase(), name: c.name! }));
+      if (list.length > countries.length) countries = list;
+    }
+  } catch { /* snapshot fallback stands */ }
+  try {
+    const res = await fetch(`${API_BASE}/categories.json`, {
+      headers: { 'User-Agent': 'GlassEarth/1.0 (https://www.glassearthlive.com)' },
+      next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const raw = (await res.json()) as unknown[];
+      const list = raw
+        .map(c => (typeof c === 'string' ? c : (c as { id?: string; name?: string })?.id ?? (c as { name?: string })?.name ?? ''))
+        .map(s => s.toLowerCase().trim())
+        .filter(s => /^[a-z][a-z-]*$/.test(s) && s !== 'xxx' && !/adult/.test(s));
+      if (list.length) categories = [...new Set([...list, ...categories])];
+    }
+  } catch { /* snapshot fallback stands */ }
+  return { countries, categories };
+}
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -38,7 +79,10 @@ export async function GET(req: NextRequest) {
     url = `${PLAYLIST_BASE}/countries/${fileCode}.m3u`;
     slice = { country };
   } else {
-    const cat = TV_CATEGORIES.includes(category as (typeof TV_CATEGORIES)[number]) ? category : 'news';
+    /* Any well-formed IPTV-org category slug is a slice; the adult slug
+       is the one permanent refusal. Validating against a frozen list
+       would silently substitute news whenever IPTV-org adds a category. */
+    const cat = /^[a-z][a-z-]*$/.test(category) && category !== 'xxx' && !/adult/.test(category) ? category : 'news';
     url = `${PLAYLIST_BASE}/categories/${cat}.m3u`;
     slice = { category: cat };
   }
@@ -56,13 +100,14 @@ export async function GET(req: NextRequest) {
       );
     }
     const channels = parseM3u(await res.text(), slice);
+    const meta = await directoryMeta();
     return NextResponse.json(
       {
         channels,
         total: channels.length,
         slice,
-        countries: TV_COUNTRIES,
-        categories: TV_CATEGORIES,
+        countries: meta.countries,
+        categories: meta.categories,
         source: 'IPTV-org community playlists',
         timestamp: new Date().toISOString(),
       },

@@ -38,6 +38,16 @@ describe('parseM3u', () => {
     expect(hbo?.userAgent).toBe('Mozilla/5.0');
   });
 
+  it('also captures the hints declared as EXTINF attributes', () => {
+    const text = `#EXTM3U
+#EXTINF:-1 tvg-id="2M.ma@SD" http-referrer="http://www.radio2m.ma/" http-user-agent="Mozilla/5.0 (Test)" group-title="General",2M Monde
+https://cdn.example/2m.m3u8
+`;
+    const ch = parseM3u(text)[0];
+    expect(ch?.referer).toBe('http://www.radio2m.ma/');
+    expect(ch?.userAgent).toBe('Mozilla/5.0 (Test)');
+  });
+
   it('drops adult-group entries and dedupes by id', () => {
     const channels = parseM3u(M3U);
     expect(channels.some(c => /after dark/i.test(c.name))).toBe(false);

@@ -34,12 +34,15 @@ export interface TvChannel {
   userAgent?: string;
 }
 
-/** Categories IPTV-org publishes slices for (adult is deliberately absent). */
+/** Categories IPTV-org publishes slices for — the exact slug list from
+    their PLAYLISTS.md (adult's `xxx` slug is deliberately absent, and the
+    parser drops adult groups regardless). */
 export const TV_CATEGORIES = [
   'news', 'sports', 'movies', 'series', 'music', 'entertainment', 'kids',
-  'documentary', 'animation', 'business', 'classic', 'comedy', 'cooking',
-  'culture', 'education', 'family', 'general', 'lifestyle', 'outdoor',
-  'relax', 'religious', 'science', 'shop', 'travel', 'weather',
+  'documentary', 'animation', 'auto', 'business', 'classic', 'comedy',
+  'cooking', 'culture', 'education', 'family', 'general', 'legislative',
+  'lifestyle', 'outdoor', 'relax', 'religious', 'science', 'shop',
+  'travel', 'weather', 'undefined',
 ] as const;
 
 /** Groups whose channels never enter the app, whatever slice they ride in on. */
@@ -116,8 +119,10 @@ export function parseM3u(text: string, slice: { country?: string; category?: str
         category: group || slice.category || '',
         logo: attr(line, 'tvg-logo'),
       };
-      referer = undefined;
-      userAgent = undefined;
+      /* The hints also appear as attributes on the EXTINF line itself in
+         the published files; #EXTVLCOPT lines (handled below) override. */
+      referer = attr(line, 'http-referrer') || undefined;
+      userAgent = attr(line, 'http-user-agent') || undefined;
       continue;
     }
     if (line.startsWith('#EXTVLCOPT:')) {
@@ -180,6 +185,7 @@ interface RadioBrowserStation {
   stationuuid?: string;
   name?: string;
   country?: string;
+  countrycode?: string;
   state?: string;
   tags?: string;
   bitrate?: number;
@@ -197,7 +203,9 @@ export function normalizeRadioStation(raw: RadioBrowserStation): RadioStation | 
   return {
     uuid: raw.stationuuid,
     name: (raw.name || 'Unknown station').trim(),
-    country: raw.country ?? '',
+    /* Radio Browser deprecates the free-text country field in favour of
+       the ISO code; prefer the name while it exists, fall back to code. */
+    country: raw.country || raw.countrycode || '',
     state: raw.state ?? '',
     tags: raw.tags ?? '',
     bitrate: raw.bitrate ?? 0,
