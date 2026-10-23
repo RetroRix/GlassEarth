@@ -81,9 +81,25 @@ export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
     const el = rootRef.current;
     let entered = false;
     if (el && !document.fullscreenElement) {
-      el.requestFullscreen().then(() => { entered = true; }).catch(() => {});
+      /* requestFullscreen returns a promise only in newer browsers; older
+         Safari/WebKit hands back undefined, and chaining .then off that
+         threw a TypeError that took this whole screen down on entry.
+         Keep the promise if there is one; never let a refusal — or a
+         missing promise — become an exception. */
+      try {
+        const asked: unknown = el.requestFullscreen();
+        if (asked instanceof Promise) asked.then(() => { entered = true; }).catch(() => {});
+        else entered = true;
+      } catch { /* refused outright: the mode still works windowed */ }
     }
-    return () => { if (entered && document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
+    return () => {
+      if (entered && document.fullscreenElement) {
+        try {
+          const left: unknown = document.exitFullscreen();
+          if (left instanceof Promise) left.catch(() => {});
+        } catch { /* already out */ }
+      }
+    };
   }, []);
 
   /* Screensaver rules: any key leaves. */

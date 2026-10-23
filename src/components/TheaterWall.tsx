@@ -148,8 +148,14 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
   };
 
   const toggleFullscreen = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else rootRef.current?.requestFullscreen().catch(() => {});
+    /* As in Ambient TV: the fullscreen calls return undefined rather than
+       a promise in older Safari/WebKit, so never chain off the result. */
+    try {
+      const result: unknown = document.fullscreenElement
+        ? document.exitFullscreen()
+        : rootRef.current?.requestFullscreen();
+      if (result instanceof Promise) result.catch(() => {});
+    } catch { /* fullscreen is best effort */ }
   };
   useEffect(() => {
     const onFs = () => setIsFs(Boolean(document.fullscreenElement));
@@ -204,7 +210,10 @@ export default function TheaterWall({ cameras, onClose, onOpenCamera, onAmbient 
     return (
       <div
         key={slotIndex}
-        className="group relative overflow-hidden bg-black"
+        /* Focused, the tile is a plain block rather than a grid item, and
+           everything inside it is absolutely positioned — without an
+           explicit height it collapses to a border and clips the feed. */
+        className={`group relative overflow-hidden bg-black ${big ? 'h-full' : ''}`}
         style={{ border: '1px solid rgba(255,255,255,0.09)' }}
       >
         {cam ? (
