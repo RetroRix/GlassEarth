@@ -32,7 +32,10 @@ export async function GET(req: NextRequest) {
     if (!/^[A-Z]{2}$/.test(country)) {
       return NextResponse.json({ channels: [], total: 0, error: 'country must be a 2-letter code' }, { status: 400 });
     }
-    url = `${PLAYLIST_BASE}/countries/${country.toLowerCase()}.m3u`;
+    /* IPTV-org files the United Kingdom under its reserved ISO code 'uk',
+       not 'gb' — the one exception in their country slices. */
+    const fileCode = country === 'GB' ? 'uk' : country.toLowerCase();
+    url = `${PLAYLIST_BASE}/countries/${fileCode}.m3u`;
     slice = { country };
   } else {
     const cat = TV_CATEGORIES.includes(category as (typeof TV_CATEGORIES)[number]) ? category : 'news';

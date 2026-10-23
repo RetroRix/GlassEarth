@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
   let path: string;
   switch (mode) {
     case 'country':
-      path = `stations/bycountryexact/${encodeURIComponent(q)}?${common}&order=votes&reverse=true&limit=${limit}`;
+      path = `stations/bycountry/${encodeURIComponent(q)}?${common}&order=votes&reverse=true&limit=${limit}`;
       break;
     case 'tag':
       path = `stations/bytag/${encodeURIComponent(q.toLowerCase())}?${common}&order=votes&reverse=true&limit=${limit}`;
