@@ -157,7 +157,7 @@ async function fetchAdsbFiRegion(lat: number, lon: number): Promise<any[]> {
 async function fetchAdsbLolRegion(lat: number, lon: number): Promise<any[]> {
   try {
     const res = await stealthFetch(`${ADSBLOL_BASE}/lat/${lat}/lon/${lon}/dist/${ADSB_MAX_DIST}`, {
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
       const data = await res.json();
@@ -459,12 +459,27 @@ export async function GET() {
       }
       lolCount = allRaw.length - before;
 
-      for (const r of emptyRegions) {
-        const beforeFi = allRaw.length;
-        ingestAc(await fetchAdsbFiRegion(r.lat, r.lon), allRaw, seenHex);
-        fiRegionalCount += allRaw.length - beforeFi;
-        await new Promise(resolve => setTimeout(resolve, ADSBFI_GAP_MS));
-      }
+      /* adsb.fi fallback for the regions adsb.lol answered empty — run
+         through a small pool under an overall time budget. The first
+         version marched serially with a 1.1s gap per region, and from
+         Vercel's egress (where more regions come back empty) that tail
+         could push the whole sweep past the 60s function limit and the
+         route died mid-answer. Regions the budget skips are simply
+         retried on the next cache cycle. */
+      const FALLBACK_BUDGET_MS = 20_000;
+      const fallbackStart = Date.now();
+      let fiCursor = 0;
+      const fiWorker = async () => {
+        while (fiCursor < emptyRegions.length) {
+          if (Date.now() - fallbackStart > FALLBACK_BUDGET_MS) return;
+          const r = emptyRegions[fiCursor++];
+          const beforeFi = allRaw.length;
+          ingestAc(await fetchAdsbFiRegion(r.lat, r.lon), allRaw, seenHex);
+          fiRegionalCount += allRaw.length - beforeFi;
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
+      };
+      await Promise.all([fiWorker(), fiWorker(), fiWorker()]);
 
       if (allRaw.length === 0) {
         console.error(

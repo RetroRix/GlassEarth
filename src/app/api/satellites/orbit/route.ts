@@ -57,33 +57,68 @@ function catalogue(): Map<string, Tle> {
   return byNorad;
 }
 
-/** Per-satellite TLEs resolved from CelesTrak, keyed by NORAD id. A null is a
-    remembered miss, so an unknown id does not re-fetch on every click. */
+/** Per-satellite TLEs resolved remotely, keyed by NORAD id. A null is a
+    remembered miss — but only briefly: CelesTrak throttles shared
+    datacenter egress IPs intermittently, and a 30-minute negative cache
+    froze those transient 403s into permanent 404s for exactly the
+    satellites someone had clicked during a throttle window. */
 const remoteCache = new Map<string, { tle: Tle | null; at: number }>();
 const REMOTE_TTL_MS = 30 * 60_000;
+const REMOTE_MISS_TTL_MS = 60_000;
+
+function parseTleText(text: string): Tle | null {
+  const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0);
+  const i1 = lines.findIndex(l => l.startsWith('1 '));
+  const i2 = lines.findIndex(l => l.startsWith('2 '));
+  if (i1 < 0 || i2 <= i1) return null;
+  return { name: (lines[i1 - 1] ?? '').trim(), line1: lines[i1], line2: lines[i2] };
+}
 
 async function tleFromCelesTrak(id: string): Promise<Tle | null> {
-  const hit = remoteCache.get(id);
-  if (hit && Date.now() - hit.at < REMOTE_TTL_MS) return hit.tle;
-  let tle: Tle | null = null;
   try {
     const res = await fetch(
       `https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(id)}&FORMAT=TLE`,
       { signal: AbortSignal.timeout(12000), headers: { Accept: 'text/plain' } },
     );
-    if (res.ok) {
-      const lines = (await res.text()).split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0);
-      const i1 = lines.findIndex(l => l.startsWith('1 '));
-      const i2 = lines.findIndex(l => l.startsWith('2 '));
-      if (i1 >= 0 && i2 > i1) {
-        tle = { name: (lines[i1 - 1] ?? '').trim(), line1: lines[i1], line2: lines[i2] };
-      }
-    } else {
-      await res.body?.cancel();
+    if (res.ok) return parseTleText(await res.text());
+    await res.body?.cancel();
+  } catch {
+    // fall through to the retry / mirror
+  }
+  return null;
+}
+
+/** A public TLE mirror (Ivan Stanojevic's API over the same CelesTrak data).
+    Its catalogue lags CelesTrak by days to weeks, so it is the last resort:
+    a slightly stale TLE still draws the right orbit shape, while a 404
+    draws nothing. */
+async function tleFromMirror(id: string): Promise<Tle | null> {
+  try {
+    const res = await fetch(`https://tle.ivanstanojevic.me/api/tle/${encodeURIComponent(id)}`, {
+      signal: AbortSignal.timeout(12000),
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) { await res.body?.cancel(); return null; }
+    const data = await res.json();
+    if (typeof data?.line1 === 'string' && typeof data?.line2 === 'string') {
+      return { name: String(data.name ?? '').trim(), line1: data.line1, line2: data.line2 };
     }
   } catch {
-    // CelesTrak unreachable: the caller 404s, as it did for an empty catalogue.
+    // mirror unreachable: the caller 404s, as it did for an empty catalogue
   }
+  return null;
+}
+
+async function tleRemote(id: string): Promise<Tle | null> {
+  const hit = remoteCache.get(id);
+  if (hit && Date.now() - hit.at < (hit.tle ? REMOTE_TTL_MS : REMOTE_MISS_TTL_MS)) return hit.tle;
+  let tle = await tleFromCelesTrak(id);
+  if (!tle) {
+    // One retry after a beat — the common failure is a throttle blip.
+    await new Promise(r => setTimeout(r, 1200));
+    tle = await tleFromCelesTrak(id);
+  }
+  if (!tle) tle = await tleFromMirror(id);
   remoteCache.set(id, { tle, at: Date.now() });
   return tle;
 }
@@ -116,7 +151,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'numeric NORAD id required' }, { status: 400 });
   }
 
-  const tle = catalogue().get(String(Number(id))) ?? (await tleFromCelesTrak(String(Number(id))));
+  const tle = catalogue().get(String(Number(id))) ?? (await tleRemote(String(Number(id))));
   if (!tle) {
     return NextResponse.json({ error: 'not in catalogue', noradId: id }, { status: 404 });
   }
