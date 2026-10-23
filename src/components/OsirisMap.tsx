@@ -462,6 +462,31 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
       const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'scan-targets', 'sdk-entities', 'sdk-links', 'malware-nodes', 'malware-new', 'network-mesh', 'cyber-heads', 'gdelt-events', 'cf-outages', 'cf-attacks', 'alert-pins'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
+      // ── US STATE BORDERS ──
+      // Bundled Census cartographic-boundary outlines (public/us-states.json,
+      // converted from the Census-derived us-atlas states TopoJSON — public
+      // domain source data, served from our own origin, no third-party CDN).
+      // Added before every other custom layer so the outlines sit directly on
+      // the basemap, under all data. Colours are picked per theme at init
+      // (the map remounts on a theme swap): a slate line on Positron, a pale
+      // steel line on dark matter, each with an opposite-tone casing so the
+      // border reads on both. State names come from the basemaps themselves
+      // at mid zooms, so no label layer is added here.
+      map.addSource('us-states', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'us-states-casing', type: 'line', source: 'us-states', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: {
+        'line-color': theme === 'day' ? '#ffffff' : '#05070c',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.2, 8, 4],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.25, 5, 0.45],
+      }});
+      map.addLayer({ id: 'us-states-line', type: 'line', source: 'us-states', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: {
+        'line-color': theme === 'day' ? '#5b6b82' : '#93a7c4',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.1, 8, 2],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.45, 5, 0.7],
+      }});
+      fetch('/us-states.json')
+        .then(r => (r.ok ? r.json() : null))
+        .then(gj => { const src = map.getSource('us-states') as any; if (gj && src) src.setData(gj); })
+        .catch(() => { /* borders quietly absent rather than a broken map */ });
 
       // ── FLIGHT ROUTE VISUALIZATION SOURCES & LAYERS ──
 
@@ -2274,6 +2299,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['network-mesh-atmo', 'network-mesh-glow', 'network-mesh-core'], activeLayers.internet_outages || activeLayers.malware);
     setVis(['cyber-heads','cyber-labels'], (activeLayers as any).cyber_attacks);
     setVis(['day-night-fill'], activeLayers.day_night);
+    setVis(['us-states-casing','us-states-line'], activeLayers.state_borders !== false);
     setVis(['fl-commercial'], activeLayers.flights);
     setVis(['fl-private'], activeLayers.private);
     setVis(['fl-jets'], activeLayers.jets);

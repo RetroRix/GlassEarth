@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import IntelFeed from '@/components/IntelFeed';
@@ -459,13 +459,21 @@ export default function Dashboard() {
      visitors said the dark landing was hard to navigate. A saved Style
      Studio customisation was composed against the dark look, so when one
      exists the app still opens on CORE and the saved tokens are applied
-     over it below — the stored choice wins, untouched. */
+     over it below — the stored choice wins, untouched. An explicit theme
+     choice (the Day/Night toggle, the LayerPanel ghost switch) is stored
+     under its own key and beats both defaults, so it survives reloads;
+     the Style Studio key is never read or written here. */
   const [osirisTheme, setOsirisTheme] = useState<'core'|'ghost'|'day'>(() => {
-    try { return loadSavedSettings() ? 'core' : 'day'; } catch { return 'day'; }
+    try {
+      const chosen = localStorage.getItem('osiris:theme');
+      if (chosen === 'day' || chosen === 'core' || chosen === 'ghost') return chosen;
+      return loadSavedSettings() ? 'core' : 'day';
+    } catch { return 'day'; }
   });
 
   useEffect(() => {
     document.body.className = osirisTheme === 'core' ? '' : `theme-${osirisTheme}`;
+    try { localStorage.setItem('osiris:theme', osirisTheme); } catch { /* private mode */ }
   }, [osirisTheme]);
 
   /* Style Studio overrides are inline on <body>, so they survive the theme
@@ -516,6 +524,10 @@ export default function Dashboard() {
     alert_pins: false,
     war_alerts: false,
     day_night: true,
+    /* US state boundary outlines (bundled Census-derived GeoJSON) — on,
+       because the outlines are how most people read a US map; the toggle
+       lives with the other display layers. */
+    state_borders: true,
     cables: true,
     sdk_sea: true,
     sdk_air: true,
@@ -1796,6 +1808,15 @@ export default function Dashboard() {
 
       {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ── */}
       {!isMobile && <motion.div data-hud initial={{ opacity: 0, x: 12 }} animate={revealed ? { opacity: 1, x: 0 } : { opacity: 0, x: 12 }} transition={hudIn(0.3)} className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
+        <div className="relative group">
+          <button onClick={() => setOsirisTheme(osirisTheme === 'day' ? 'core' : 'day')} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${osirisTheme === 'day' ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Day / Night — switch the app between the light day theme and the dark theme" aria-label="Toggle day and night mode" aria-pressed={osirisTheme === 'day'}>
+            {osirisTheme === 'day'
+              ? <Sun className="w-4 h-4 text-[var(--gold-primary)]" />
+              : <Moon className="w-4 h-4 text-white/60" />}
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">DAY / NIGHT</span>
+        </div>
+
         <div className="relative group">
           <button onClick={() => { setShowOi(false); setShowAlerts(false); setShowMarkets(false); setShowSpaceCam(v => !v); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showSpaceCam ? 'bg-[#00E5FF]/20' : 'hover:bg-white/10'}`} title="Live from Space — 24/7 video downlink from the ISS" aria-label="Live from Space" aria-expanded={showSpaceCam}>
             <Radio className={`w-4 h-4 ${showSpaceCam ? 'text-[#00E5FF]' : 'text-white/60'}`} />

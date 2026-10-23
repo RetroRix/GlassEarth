@@ -3,7 +3,7 @@
 import { memo, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plane, Satellite, Sun, AlertTriangle, Camera,
+  Plane, Satellite, Sun, Moon, AlertTriangle, Camera,
   CloudLightning, CloudSun, Ship, Network, Database, Ghost,
   Flame, Tv, Radio, Mountain, Anchor, Megaphone, SlidersHorizontal, Bus
 } from 'lucide-react';
@@ -161,6 +161,7 @@ const LAYER_GROUPS: LayerGroupDef[] = [
     icon: Sun,
     layers: [
       { key: 'day_night', label: 'Day / Night Cycle', dataKey: '' },
+      { key: 'state_borders', label: 'US State Borders', dataKey: '' },
       { key: 'terrain_3d', label: '3D Buildings', description: 'City detail · zoom 14.5+', dataKey: '' },
       { key: 'terrain_elevation', label: '3D Terrain', description: 'Mountains · zoom 10+', dataKey: '' },
     ],
@@ -342,6 +343,29 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
         <AnimatePresence>
           {studioOpen && <StyleStudio isMobile onClose={() => setStudioOpen(false)} />}
         </AnimatePresence>
+
+        {/* MOBILE DAY / NIGHT TOGGLE — the same base-theme switch as the
+            desktop tool strip's sun/moon button. */}
+        {setTheme && (
+          <div className="flex items-center justify-between pt-3 border-t border-white/[0.06] px-1">
+            <span className="text-[10px] font-mono tracking-[0.2em] text-white/25 uppercase">Day / Night</span>
+            <button
+              onClick={() => setTheme(theme === 'day' ? 'core' : 'day')}
+              className="w-8 h-8 rounded-full flex items-center justify-center transition-all"
+              style={{
+                background: theme === 'day' ? 'rgba(212, 175, 55, 0.15)' : 'transparent',
+                boxShadow: theme === 'day' ? '0 0 12px rgba(212, 175, 55, 0.3)' : 'none',
+              }}
+              title="Day / Night — switch between the light day theme and the dark theme"
+              aria-label="Toggle day and night mode"
+              aria-pressed={theme === 'day'}
+            >
+              {theme === 'day'
+                ? <Sun className="w-4 h-4" style={{ color: 'var(--gold-primary)' }} />
+                : <Moon className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.25)' }} />}
+            </button>
+          </div>
+        )}
 
         {/* MOBILE GHOST TOGGLE */}
         {setTheme && (
