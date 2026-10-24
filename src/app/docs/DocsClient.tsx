@@ -6,6 +6,7 @@ import { API_GROUPS, ENDPOINT_COUNT, endpointId } from './apiCatalog';
 import { Callout, Code, CodeBlock, Pre, Section } from './docsPrimitives';
 import EndpointCard from './EndpointCard';
 import CommandPalette, { buildPaletteItems } from './CommandPalette';
+import BrandGlobe from '@/components/BrandGlobe';
 
 const GUIDE_SECTIONS = [
   { id: 'overview', title: 'Overview' },
@@ -142,7 +143,7 @@ export default function DocsClient() {
       <header className="sticky top-0 z-[300] border-b border-white/[0.06] bg-[var(--bg-void)]/85 backdrop-blur-xl">
         <div className="max-w-[1600px] mx-auto px-4 md:px-8 h-14 flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
-            <img src="/brand/glass-earth-logo.png" alt="Glass Earth" className="w-6 h-6 shrink-0" />
+            <BrandGlobe className="w-6 h-6 shrink-0" />
             <span className="flex flex-col leading-none">
               <span className="text-[12px] font-bold tracking-[0.3em] text-[var(--gold-primary)] font-mono">
                 GLASS EARTH

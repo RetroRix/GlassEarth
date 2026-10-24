@@ -25,6 +25,7 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import WorldRemote from '@/components/WorldRemote';
+import BrandGlobe from '@/components/BrandGlobe';
 import ArcGISPanel from '@/components/ArcGISPanel';
 import TvPanel from '@/components/TvPanel';
 import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
@@ -1420,16 +1421,16 @@ export default function Dashboard() {
                 <div className="absolute bottom-0 left-1/4 translate-y-1/2 w-1 h-1 rounded-full" style={{ background: 'rgba(0,229,255,0.4)' }} />
               </motion.div>
 
-              {/* ── Glass Earth logo — the G Cut ── */}
-              <motion.img
-                src="/brand/glass-earth-logo.png"
-                alt="Glass Earth logo"
+              {/* ── Glass Earth logo — the G Cut, as a living globe ── */}
+              <motion.div
                 initial={{ opacity: 0, scale: 0.5 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.4, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
                 className="relative w-24 h-24 rounded-[20%] z-[2]"
                 style={{ boxShadow: '0 0 32px rgba(56,189,248,0.22), 0 0 64px rgba(212,175,55,0.08)' }}
-              />
+              >
+                <BrandGlobe className="w-full h-full" title="Glass Earth logo" />
+              </motion.div>
 
               {/* Faint pulsing radar sweep */}
               <motion.div
@@ -1748,7 +1749,7 @@ export default function Dashboard() {
       {/* ── HEADER ── */}
       <motion.div data-hud initial={{ opacity: 0, y: -20 }} animate={revealed ? { opacity: 1, y: 0 } : { opacity: 0, y: -20 }} transition={hudIn(0.15)} className={`absolute top-4 z-[200] pointer-events-none flex flex-col`} style={{ left: isMobile ? '24px' : '64px', right: '24px' }}>
         <div className="flex items-center gap-3 w-fit">
-          <img src="/brand/glass-earth-logo.png" alt="Glass Earth" className="w-8 h-8 md:w-10 md:h-10 shrink-0" />
+          <BrandGlobe className="w-8 h-8 md:w-10 md:h-10 shrink-0" />
           <div className="flex flex-col items-start gap-0.5">
             <h1 className="text-lg md:text-xl font-bold tracking-[0.4em] text-[#D4AF37] font-mono">GLASS EARTH</h1>
             <span className="text-[9px] md:text-[10px] font-mono tracking-[0.2em] opacity-80 uppercase text-[#D4AF37]">REAL-TIME EARTH OBSERVATION</span>
