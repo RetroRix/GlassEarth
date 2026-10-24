@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices } from 'lucide-react';
@@ -8,6 +8,7 @@ import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, type WallCamera } from '@/lib/theater-wall';
 import { decodeShareView, type SharedView } from '@/lib/share-view';
+import { isHalloweenWindow, hasSpookyPreview } from '@/lib/seasonal';
 import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
@@ -166,6 +167,15 @@ const newsTransform = (d: { news?: unknown[]; sources?: unknown[]; timestamp?: s
   /* The reports that resolved to a place they name — the Live Alert Pins layer. */
   alert_pins: (d.news ?? []).filter(n => (n as { place?: unknown } | null)?.place),
 });
+
+/* Halloween launch-week accents (lib/seasonal) — pumpkin orange. The bright
+   shade reads on the app's dark glass; the deeper one keeps the header
+   subtitle legible over the light day theme. Applied only to elements whose
+   colours are constants today — nothing the Style Studio drives (its CSS
+   variables) is read or written by the seasonal touches, so a saved theme
+   always wins. */
+const SPOOKY_ORANGE = '#FF7518';
+const SPOOKY_ORANGE_DAY = '#C2410C';
 
 /* One version label for the splash and the header, which used to disagree. */
 const APP_VERSION = 'V5.0';
@@ -489,6 +499,17 @@ export default function Dashboard() {
     document.body.className = osirisTheme === 'core' ? '' : `theme-${osirisTheme}`;
     try { localStorage.setItem('osiris:theme', osirisTheme); } catch { /* private mode */ }
   }, [osirisTheme]);
+
+  /* Halloween launch-week theme: read from the VISITOR's local date (or the
+     ?spooky=1 preview) via useSyncExternalStore. The server snapshot is
+     always "off", matching the prerendered page byte for byte; the client
+     snapshot flips it on right after mount, under the splash, when the
+     visitor is in the window. Never persisted — a session-only read. */
+  const spooky = useSyncExternalStore(
+    () => () => {},
+    () => isHalloweenWindow() || hasSpookyPreview(window.location.search),
+    () => false,
+  );
 
   /* Style Studio overrides are inline on <body>, so they survive the theme
      swap above and only need reapplying once per load. */
@@ -1584,6 +1605,20 @@ export default function Dashboard() {
               See everything. Miss nothing.
             </motion.p>
 
+            {/* ── Seasonal line — Halloween launch week only (lib/seasonal);
+                absent from the tree entirely outside the window ── */}
+            {spooky && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.9 }}
+                transition={{ delay: 1.85, duration: 0.6 }}
+                className="mb-3 z-[2] text-[11px] md:text-xs font-mono tracking-[0.25em]"
+                style={{ color: SPOOKY_ORANGE, textShadow: '0 0 18px rgba(255,117,24,0.35)' }}
+              >
+                The planet is live tonight — all of it.
+              </motion.p>
+            )}
+
             {/* ── Credit ── */}
             <motion.p
               initial={{ opacity: 0 }}
@@ -1597,7 +1632,7 @@ export default function Dashboard() {
             {/* ── Multi-stage progress bar ── */}
             <div className="w-64 md:w-80 z-[2]">
               {/* Thin progress track */}
-              <div className="relative w-full h-[2px] rounded-full overflow-hidden" style={{ background: 'rgba(212,175,55,0.1)' }}>
+              <div className="relative w-full h-[2px] rounded-full overflow-hidden" style={{ background: spooky ? 'rgba(255,117,24,0.16)' : 'rgba(212,175,55,0.1)' }}>
                 <motion.div
                   initial={{ width: '0%' }}
                   animate={{ width: SPLASH_PROGRESS[splashStage] }}
@@ -1853,7 +1888,7 @@ export default function Dashboard() {
           <BrandGlobe className="w-8 h-8 md:w-10 md:h-10 shrink-0" />
           <div className="flex flex-col items-start gap-0.5">
             <h1 className="text-lg md:text-xl font-bold tracking-[0.4em] text-[#D4AF37] font-mono">GLASS EARTH</h1>
-            <span className="text-[9px] md:text-[10px] font-mono tracking-[0.2em] opacity-80 uppercase text-[#D4AF37]">REAL-TIME EARTH OBSERVATION</span>
+            <span className="text-[9px] md:text-[10px] font-mono tracking-[0.2em] opacity-80 uppercase text-[#D4AF37]" style={spooky ? { color: osirisTheme === 'day' ? SPOOKY_ORANGE_DAY : SPOOKY_ORANGE } : undefined}>REAL-TIME EARTH OBSERVATION</span>
           </div>
         </div>
         <div className="flex items-center gap-3 mt-1.5 pl-[44px] min-w-0 pr-4">
@@ -1928,7 +1963,7 @@ export default function Dashboard() {
         <div className="relative group">
           <button onClick={takeMeSomewhereLive} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title={cameraCount > 0 ? 'Take me somewhere live — a random live camera, somewhere on Earth' : 'Take me somewhere live — the camera catalogue is still loading'} aria-label="Take me somewhere live">
             {cameraCount > 0
-              ? <Dices className="w-4 h-4 text-white/60" />
+              ? <Dices className={`w-4 h-4 ${spooky ? 'text-[#FF7518]' : 'text-white/60'}`} />
               : <span aria-hidden="true" className="block w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-transparent animate-spin" />}
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SOMEWHERE LIVE</span>
