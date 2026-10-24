@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import './BrandGlobe.css';
 
 /**
  * BrandGlobe — the G Cut as a living globe.
  *
- * Three layers, bottom to top (styles in globals.css, `.brand-globe*`):
+ * Three layers, bottom to top (styles in BrandGlobe.css, `.brand-globe*`):
  *  1. A circular disc filled with an equirectangular Earth texture
  *     (NASA Blue Marble, public domain, duotone-tinted to the brand's
  *     glassy teal) that scrolls horizontally — one turn ≈ 30 s — so the
