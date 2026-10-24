@@ -42,6 +42,10 @@
      What the map itself draws with. Mirrored in src/lib/map-palette.ts, which
      reads these back; the two copies are pinned together by its tests. */
   --map-cctv: #00e676;
+  /* The camera green as it must read on a DARK chip, whatever the theme.
+     The preview caption bars are black in every theme; the day theme
+     darkens --map-cctv for the pale basemap, which goes muddy on them. */
+  --map-cctv-on-dark: #00e676;
   --map-sat-comms: #00e676;
   --map-sat-military: #ff3d3d;
   --map-sat-navigation: #448aff;
@@ -70,6 +74,38 @@
   --text-heading: #F5F0E0;
   --text-gold: #D4AF37;
   --text-cyan: #00E5FF;
+
+  /* ── Layer Panel foregrounds ──
+     The panel's rows were written in white tints meant for dark glass.
+     In the day theme the glass itself turns light and the tints vanish,
+     so they resolve through these tokens instead: white on the dark
+     themes, ink on day. The desktop flyouts keep their own dark
+     background in every theme — .lp-darkscope below re-pins the dark
+     values inside them. */
+  --lp-fg-strong: rgba(255, 255, 255, 0.8);
+  --lp-fg-body: rgba(255, 255, 255, 0.6);
+  --lp-fg-mid: rgba(255, 255, 255, 0.55);
+  --lp-fg-soft: rgba(255, 255, 255, 0.4);
+  --lp-fg-faint: rgba(255, 255, 255, 0.35);
+  --lp-fg-head: rgba(255, 255, 255, 0.3);
+  --lp-fg-mute: rgba(255, 255, 255, 0.25);
+  --lp-border: rgba(255, 255, 255, 0.06);
+  --lp-border-med: rgba(255, 255, 255, 0.1);
+  --lp-border-btn: rgba(255, 255, 255, 0.15);
+  --lp-border-stem: rgba(255, 255, 255, 0.14);
+  --lp-fill: rgba(255, 255, 255, 0.03);
+  --lp-hover: rgba(255, 255, 255, 0.04);
+  --lp-hover-strong: rgba(255, 255, 255, 0.1);
+  --lp-rail-bg: rgba(0, 0, 0, 0.15);
+
+  /* ── Layer toggle switch (LayerPanel's ToggleSwitch) ── */
+  --tg-track-on: rgba(255, 255, 255, 0.2);
+  --tg-border-on: rgba(255, 255, 255, 0.35);
+  --tg-border-off: rgba(255, 255, 255, 0.12);
+  --tg-knob-on: rgba(255, 255, 255, 0.85);
+  --tg-knob-off: rgba(255, 255, 255, 0.2);
+  --tg-glow-on: rgba(255, 255, 255, 0.4);
+  --tg-trackglow-on: rgba(255, 255, 255, 0.1);
 
   /* ── Scrollbar ── */
   --scrollbar-thumb: rgba(var(--gold-rgb), 0.2);
@@ -139,6 +175,7 @@ body.theme-ghost {
      satellite entries are deliberately left alone: they are the signal that
      nobody has overridden that category, so the feed's mission colours show. */
   --map-cctv: #b388ff;
+  --map-cctv-on-dark: #b388ff;
   --map-flight-civil: #b388ff;
   --map-flight-private: #ce93d8;
   --map-flight-gov: #d500f9;
@@ -201,10 +238,39 @@ body.theme-day {
      pale ground they wash out, so the day theme darkens them to the
      same hues at print weight. */
   --map-cctv: #00A152;
+  /* …but the preview caption bars stay black in day too, so the name on
+     them keeps the bright green. */
+  --map-cctv-on-dark: #00e676;
   --map-flight-civil: #0288D1;
   --map-flight-private: #B8860B;
   --map-flight-gov: #E65100;
   --map-flight-unknown: #546E7A;
+
+  /* Panel foregrounds flip to ink: the day glass is light and the white
+     tints the panel was written in vanish on it (see :root). The toggle
+     goes gold, matching the .layer-toggle switch's active treatment. */
+  --lp-fg-strong: rgba(18, 20, 26, 0.88);
+  --lp-fg-body: rgba(18, 20, 26, 0.68);
+  --lp-fg-mid: rgba(18, 20, 26, 0.62);
+  --lp-fg-soft: rgba(18, 20, 26, 0.52);
+  --lp-fg-faint: rgba(18, 20, 26, 0.45);
+  --lp-fg-head: rgba(18, 20, 26, 0.45);
+  --lp-fg-mute: rgba(18, 20, 26, 0.4);
+  --lp-border: rgba(18, 20, 26, 0.1);
+  --lp-border-med: rgba(18, 20, 26, 0.16);
+  --lp-border-btn: rgba(18, 20, 26, 0.22);
+  --lp-border-stem: rgba(18, 20, 26, 0.22);
+  --lp-fill: rgba(18, 20, 26, 0.04);
+  --lp-hover: rgba(18, 20, 26, 0.05);
+  --lp-hover-strong: rgba(18, 20, 26, 0.08);
+  --lp-rail-bg: rgba(10, 12, 18, 0.5);
+  --tg-track-on: rgba(var(--gold-rgb), 0.25);
+  --tg-border-on: var(--gold-primary);
+  --tg-border-off: rgba(18, 20, 26, 0.28);
+  --tg-knob-on: var(--gold-primary);
+  --tg-knob-off: rgba(18, 20, 26, 0.38);
+  --tg-glow-on: rgba(var(--gold-rgb), 0.45);
+  --tg-trackglow-on: rgba(var(--gold-rgb), 0.2);
 }
 
 /* ── Base ── */
@@ -402,6 +468,38 @@ html:has(.docs-root) body {
   background: var(--text-muted); transition: all 0.3s ease;
 }
 .layer-toggle.active::after { left: 15px; background: var(--gold-primary); box-shadow: 0 0 8px rgba(var(--gold-rgb), 0.5); }
+
+/* ── Dark-scope pin ──
+   The desktop layer rail's flyouts carry their own dark background in
+   EVERY theme (rgba(0,0,0,0.6) over blur), so panel foregrounds inside
+   them must keep the dark-glass values even under body.theme-day, where
+   the tokens flip to ink for the light glass the mobile panel sits on.
+   Values repeat :root's on purpose: this scope has to win over the
+   body-level theme override for its subtree, whatever the theme. */
+.lp-darkscope {
+  --lp-fg-strong: rgba(255, 255, 255, 0.8);
+  --lp-fg-body: rgba(255, 255, 255, 0.6);
+  --lp-fg-mid: rgba(255, 255, 255, 0.55);
+  --lp-fg-soft: rgba(255, 255, 255, 0.4);
+  --lp-fg-faint: rgba(255, 255, 255, 0.35);
+  --lp-fg-head: rgba(255, 255, 255, 0.3);
+  --lp-fg-mute: rgba(255, 255, 255, 0.25);
+  --lp-border: rgba(255, 255, 255, 0.06);
+  --lp-border-med: rgba(255, 255, 255, 0.1);
+  --lp-border-btn: rgba(255, 255, 255, 0.15);
+  --lp-border-stem: rgba(255, 255, 255, 0.14);
+  --lp-fill: rgba(255, 255, 255, 0.03);
+  --lp-hover: rgba(255, 255, 255, 0.04);
+  --lp-hover-strong: rgba(255, 255, 255, 0.1);
+  --lp-rail-bg: rgba(0, 0, 0, 0.15);
+  --tg-track-on: rgba(255, 255, 255, 0.2);
+  --tg-border-on: rgba(255, 255, 255, 0.35);
+  --tg-border-off: rgba(255, 255, 255, 0.12);
+  --tg-knob-on: rgba(255, 255, 255, 0.85);
+  --tg-knob-off: rgba(255, 255, 255, 0.2);
+  --tg-glow-on: rgba(255, 255, 255, 0.4);
+  --tg-trackglow-on: rgba(255, 255, 255, 0.1);
+}
 
 /* ── Risk Badges ── */
 .risk-critical { color: #FF3D3D; text-shadow: 0 0 8px rgba(255, 61, 61, 0.5); }
