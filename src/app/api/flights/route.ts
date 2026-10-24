@@ -1,6 +1,7 @@
 
 import { NextResponse, after } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
+import { FLIGHT_SWEEP_DEADLINE_MS, isStaleSweepPromise } from '@/lib/flight-load';
 
 export const maxDuration = 60;
 
@@ -558,19 +559,49 @@ function buildPayload(
 async function runCommunitySweep(): Promise<FlightPayload> {
   const allRaw: Array<Record<string, unknown>> = [];
   const seenHex = new Set<string>();
-  const [milCount, lol] = await Promise.all([
-    fetchMilInto(allRaw, seenHex),
-    sweepLolRegions(REGIONS, allRaw, seenHex),
-  ]);
-  const fiRegionalCount = await sweepFiFallback(lol.empty, allRaw, seenHex);
+  let milCount = 0;
+  let lolCount = 0;
+  let fiRegionalCount = 0;
+  let workFailed = false;
+  const work = (async () => {
+    const [m, lol] = await Promise.all([
+      fetchMilInto(allRaw, seenHex),
+      sweepLolRegions(REGIONS, allRaw, seenHex),
+    ]);
+    milCount = m;
+    lolCount = lol.count;
+    fiRegionalCount = await sweepFiFallback(lol.empty, allRaw, seenHex);
+  })().catch(() => {
+    /* A step failed outright (not just an empty region — the per-region
+       fetchers already swallow those). Keep whatever accumulated so far. */
+    workFailed = true;
+  });
+  /* Bound the sweep: on a throttled egress IP the region fetches can each
+     burn their whole timeout, and a sweep that outlives the function's
+     maxDuration is killed mid-flight — its dedup promise then dangles
+     forever (see the guards in getFreshFlights/getFirstWave) and the
+     snapshot never refreshes. On deadline, return what accumulated so far,
+     flagged partial; the client refetches in 15 s. */
+  const deadline = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), FLIGHT_SWEEP_DEADLINE_MS));
+  const timedOut = (await Promise.race([work.then(() => 'done' as const), deadline])) === 'timeout';
   if (allRaw.length === 0) {
     console.error(
       '[OSIRIS] every flight provider returned zero aircraft — ' +
       'set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET (free at opensky-network.org) ' +
       'for an authenticated primary source'
     );
+    /* Never cache or serve an empty map as a fresh payload: a 500 lets the
+       client retry with backoff (and keeps the last-good snapshot), while a
+       200-empty would blank the map and mark the layer fetched. */
+    throw new Error('community sweep returned no aircraft');
   }
-  return buildPayload(allRaw, { source: 'community', milCount, lolCount: lol.count, fiRegionalCount });
+  return buildPayload(allRaw, {
+    source: 'community',
+    milCount,
+    lolCount,
+    fiRegionalCount,
+    ...(timedOut || workFailed ? { partial: true } : {}),
+  });
 }
 
 /** The authenticated-OpenSky sweep: military + OpenSky first, civil regions
@@ -617,8 +648,14 @@ async function runFirstWave(): Promise<FlightPayload> {
   return buildPayload(allRaw, { source: 'community', milCount, lolCount: lol.count, fiRegionalCount: 0, partial: true });
 }
 
+let firstWaveStartedAt = 0;
+
 async function getFirstWave(): Promise<FlightPayload> {
+  /* A promise older than maxDuration is a dead one (its function was killed
+     mid-flight) — discard it instead of joining it forever. */
+  if (firstWavePromise && isStaleSweepPromise(firstWaveStartedAt)) firstWavePromise = null;
   if (firstWavePromise) return firstWavePromise;
+  firstWaveStartedAt = Date.now();
   firstWavePromise = runFirstWave();
   try {
     return await firstWavePromise;
@@ -636,8 +673,14 @@ function openSkyDue(): boolean {
 /** The full sweep, deduplicated across concurrent requests, cached on
     success. With credentials and a carried-over snapshot the civil sweep is
     skipped, exactly as before — the snapshot is the source of record. */
+let fetchStartedAt = 0;
+
 async function getFreshFlights(): Promise<FlightPayload> {
+  /* A promise older than maxDuration is a dead one (its function was killed
+     mid-flight) — discard it instead of joining it forever. */
+  if (fetchPromise && isStaleSweepPromise(fetchStartedAt)) fetchPromise = null;
   if (fetchPromise) return fetchPromise;
+  fetchStartedAt = Date.now();
   fetchPromise = (async () => {
     if (openSkyDue()) return runOpenSkySweep();
     if (hasOpenSkyCreds() && osSnapshot.length > 0) {

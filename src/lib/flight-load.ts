@@ -78,3 +78,25 @@ export interface FlightPayloadFlags {
 export function normalizeFlightPayload(d: FlightPayloadFlags): FlightPayloadFlags {
   return { ...d, stale: d.stale === true, partial: d.partial === true };
 }
+
+/** Wall-clock budget for one full flight sweep, comfortably inside the
+    route's 60 s maxDuration. On a throttled egress IP the region fetches can
+    each burn their whole timeout, and a sweep that outlives its function
+    leaves a dangling dedup promise behind (see isStaleSweepPromise) — the
+    snapshot then never refreshes. On deadline the sweep returns what it
+    accumulated so far, flagged partial; the client refetches in 15 s, so the
+    next cycle gets another chance at the full picture. */
+export const FLIGHT_SWEEP_DEADLINE_MS = 40_000;
+
+/** A deduped sweep promise older than this cannot still be a live sweep: the
+    route's maxDuration is 60 s, so anything older was killed or frozen
+    mid-flight and will never settle. Joining it would wedge the instance
+    (every refresh awaiting a dead promise while the snapshot goes stale), so
+    the caller discards it and starts over. */
+export const STALE_SWEEP_PROMISE_MS = 65_000;
+
+/** True when a sweep promise started at `startedAt` is too old to still be
+    running (see STALE_SWEEP_PROMISE_MS). */
+export function isStaleSweepPromise(startedAt: number, now: number = Date.now()): boolean {
+  return now - startedAt > STALE_SWEEP_PROMISE_MS;
+}

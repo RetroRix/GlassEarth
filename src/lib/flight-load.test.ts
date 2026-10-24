@@ -7,6 +7,8 @@ import {
   isPartialFlightPayload,
   isStaleFlightPayload,
   nextFlightRetryDelay,
+  FLIGHT_SWEEP_DEADLINE_MS,
+  isStaleSweepPromise,
   normalizeFlightPayload,
 } from './flight-load';
 
@@ -65,5 +67,19 @@ describe('normalizeFlightPayload', () => {
     expect(normalizeFlightPayload({ stale: true }).stale).toBe(true);
     expect(normalizeFlightPayload({}).stale).toBe(false);
     expect(normalizeFlightPayload({ partial: true }).partial).toBe(true);
+  });
+});
+
+describe('sweep deadline', () => {
+  it('sits comfortably inside the route maxDuration', () => {
+    expect(FLIGHT_SWEEP_DEADLINE_MS).toBeLessThan(60_000);
+  });
+});
+
+describe('isStaleSweepPromise', () => {
+  it('keeps a young promise and discards one older than maxDuration', () => {
+    expect(isStaleSweepPromise(1_000, 60_000)).toBe(false);
+    expect(isStaleSweepPromise(1_000, 66_001)).toBe(true);
+    expect(isStaleSweepPromise(1_000, 66_000)).toBe(false);
   });
 });
