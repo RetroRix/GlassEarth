@@ -42,3 +42,30 @@ it('in development, locates the developer’s own connection', async () => {
   await GET(request());
   expect(fetchMock.mock.calls[0][0]).toBe('https://ipapi.co/json/');
 });
+
+it('answers from the host geo headers without calling a provider', async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+  const res = await GET(request({
+    'x-vercel-ip-latitude': '31.7619',
+    'x-vercel-ip-longitude': '-106.485',
+    'x-vercel-ip-city': 'El%20Paso',
+    'x-vercel-ip-country-region': 'TX',
+    'x-vercel-ip-country': 'US',
+  }));
+  const body = await res.json();
+  expect(body).toMatchObject({ status: 'success', lat: 31.7619, lon: -106.485, city: 'El Paso', regionName: 'TX', country: 'US' });
+  expect(res.headers.get('cache-control')).toBe('private, no-store');
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it('falls through to the providers when the host headers are unusable', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(ipapi(51.5, -0.13, 'London'));
+  vi.stubGlobal('fetch', fetchMock);
+  // Malformed latitude on one call, null-island coordinates on the next.
+  await GET(request({ 'x-vercel-ip-latitude': 'not-a-number', 'x-vercel-ip-longitude': '-0.13', 'cf-connecting-ip': '81.2.69.142' }));
+  expect(fetchMock).toHaveBeenCalled();
+  fetchMock.mockClear();
+  await GET(request({ 'x-vercel-ip-latitude': '0', 'x-vercel-ip-longitude': '0', 'cf-connecting-ip': '81.2.69.142' }));
+  expect(fetchMock).toHaveBeenCalled();
+});

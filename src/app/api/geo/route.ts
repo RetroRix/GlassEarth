@@ -6,9 +6,50 @@ import { visitorIp } from '@/lib/ssrf-guard';
 const NO_STORE = { 'Cache-Control': 'private, no-store' };
 
 // Server-side proxy for IP geolocation — avoids mixed-content block on HTTPS pages
-// Three providers with cascading fallback for maximum reliability
+// First source: the host's own geo headers (Vercel sets x-vercel-ip-* on every
+// request — city-level, free, no external call). The three providers below are
+// only the fallback for deployments where those headers are absent.
 export async function GET(request: Request) {
   try {
+    /* Vercel's edge derives these from the connection itself, so they are the
+       visitor's city even when the proxy chain has lost the address — and they
+       cost no provider call. A malformed or null-island reading falls through
+       to the providers rather than flying the visitor to 0,0. */
+    const vLat = Number(request.headers.get('x-vercel-ip-latitude'));
+    const vLon = Number(request.headers.get('x-vercel-ip-longitude'));
+    if (
+      Number.isFinite(vLat) &&
+      Number.isFinite(vLon) &&
+      vLat >= -90 &&
+      vLat <= 90 &&
+      vLon >= -180 &&
+      vLon <= 180 &&
+      !(vLat === 0 && vLon === 0)
+    ) {
+      const ip = visitorIp(request) ?? '';
+      let city = request.headers.get('x-vercel-ip-city') ?? '';
+      try {
+        city = decodeURIComponent(city);
+      } catch {
+        city = '';
+      }
+      return NextResponse.json(
+        {
+          status: 'success',
+          query: ip || 'vercel',
+          lat: vLat,
+          lon: vLon,
+          city: city || 'Unknown',
+          regionName: request.headers.get('x-vercel-ip-country-region') ?? 'Unknown',
+          country: request.headers.get('x-vercel-ip-country') ?? 'Unknown',
+          isp: 'Unknown',
+          org: 'Unknown',
+          as: 'Unknown',
+        },
+        { headers: NO_STORE },
+      );
+    }
+
     const ip = visitorIp(request) ?? '';
 
     /* No public address means the proxy chain lost the visitor's. Asking the

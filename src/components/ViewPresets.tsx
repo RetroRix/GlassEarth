@@ -2,12 +2,14 @@
 
 import { motion } from 'framer-motion';
 import { Globe, MapPin } from 'lucide-react';
+import { HOME_BASE } from '@/lib/opening-view';
 
 interface ViewPresetsProps {
   onNavigate: (lat: number, lng: number, zoom: number) => void;
 }
 
 const PRESETS = [
+  { label: 'HOME — EL PASO', lat: HOME_BASE.lat, lng: HOME_BASE.lng, zoom: HOME_BASE.zoom, icon: '🏠' },
   { label: 'GLOBAL', lat: 20, lng: 0, zoom: 2.5, icon: '🌍' },
   { label: 'EUROPE', lat: 48, lng: 10, zoom: 4, icon: '🇪🇺' },
   { label: 'MIDDLE EAST', lat: 30, lng: 45, zoom: 4.5, icon: '🔥', hot: true },

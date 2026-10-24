@@ -16,9 +16,9 @@ export const metadata: Metadata = {
  * Every statement on this page is drawn from the code in this repository, not
  * from a template; when a data flow changes, this page changes with it.
  *
- * Reviewed 2026-10-04 against: src/app/api/geo, src/app/api/osint/*,
+ * Reviewed 2026-10-24 against: src/app/api/geo, src/app/api/osint/*,
  * src/app/api/ai/*, src/app/api/oi/*, src/lib/oi/* (client, service, web,
- * newsroom, markets), src/lib/sherlock.ts,
+ * newsroom, markets), src/lib/sherlock.ts, src/lib/opening-view.ts,
  * src/app/page.tsx (IP location, storage),
  * src/components/OsirisMap.tsx (base map, satellite), src/app/globals.css
  * (fonts), src/components/LiveAlerts.tsx, src/lib/live-clouds.ts,
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
  * every localStorage and sessionStorage key in src/.
  */
 
-const REVIEWED = '4 October 2026';
+const REVIEWED = '24 October 2026';
 
 /* ───────────── The pieces ───────────── */
 
@@ -91,7 +91,7 @@ const STORED: { what: string; detail: string }[] = [
   { what: 'Your OI settings and recent predictions', detail: 'Which provider and model you use, whether replies are read aloud, and a list of your last 25 predictions so you can reopen them.' },
   { what: 'Your OI Assist conversation', detail: 'For this tab only, so a reload does not lose it.' },
   { what: 'Areas you draw on the map', detail: 'So a refresh does not wipe your work.' },
-  { what: 'How the map looks', detail: 'Your Style Studio colours and the last city the map opened on.' },
+  { what: 'How the map looks', detail: 'Your Style Studio colours, and the last place the map was looking at, so it opens there next time.' },
   { what: 'Your market watchlist and recent fingerprint searches', detail: 'So they are there next time. The search list can be cleared from the search panel.' },
 ];
 
@@ -162,13 +162,16 @@ export default function PrivacyPage() {
           <div className="flex flex-col gap-3">
             <Flow icon={<MapIcon className="h-4 w-4" />} title="Opening the map"
               summary={<>
-                The map opens over El Paso, Texas — Glass Earth's home base; no location lookup happens on load. If you
+                On your first visit the map opens over your rough location — your city, read from the connection itself
+                by our host, with El Paso, Texas (Glass Earth's home base) as the fallback when it cannot tell. When
+                you come back it opens where you left it, remembered in your own browser and never sent to us. If you
                 use a "locate me" feature in search or directions, our server asks an IP location service roughly where
                 your connection is: a city-level guess, not stored. The map itself (its tiles, the satellite view when you switch to it, and the
                 typefaces) loads from the services that draw it, as with any website that shows a map.
               </>}
               services={[
-                { name: 'ipapi.co, then freeipapi.com, then ip-api.com', what: 'your connection’s IP address, asked from our server, to place the map' },
+                { name: 'Vercel (our host)', what: 'the city your connection comes from, from headers it already sets — no IP sent anywhere else' },
+                { name: 'ipapi.co, then freeipapi.com, then ip-api.com', what: 'your connection’s IP address, asked from our server, only when the host headers are absent — to place the map' },
                 { name: 'CARTO (basemaps.cartocdn.com)', what: 'the map tiles for the part of the world in view' },
                 { name: 'Esri (server.arcgisonline.com)', what: 'satellite imagery, only when you switch to the satellite view' },
                 { name: 'Google Fonts', what: 'the typefaces the site uses' },

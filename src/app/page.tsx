@@ -3,11 +3,12 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, type WallCamera } from '@/lib/theater-wall';
 import { decodeShareView, type SharedView } from '@/lib/share-view';
+import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpeningTarget, writeLastView, type GeoLocation, type LastView } from '@/lib/opening-view';
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
 import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
@@ -218,10 +219,15 @@ export default function Dashboard() {
   const revealed = !showSplash;
   /* True once the splash has finished fading out, not merely started to. */
   const [splashGone, setSplashGone] = useState(false);
-  /* Home base: El Paso, TX. Glass Earth opens here — the camera flies in
-     once the splash has gone. (Upstream OSIRIS geolocated the visitor by IP
-     and flew there instead; this fork is a home-base dashboard.) */
-  const [homeLocation] = useState<{ lat: number; lng: number }>({ lat: 31.7619, lng: -106.485 });
+  /* Opening view — visitor-aware. Precedence (see lib/opening-view):
+     shared-view link > remembered last view > IP-located city > El Paso home
+     base. The home base is no longer the default; it is the fallback, and the
+     Home control. The geo lookup runs in parallel with the splash and is read
+     when the opening flight is due — if it has not answered yet, home base
+     wins rather than the opening waiting. */
+  const lastViewRef = useRef<LastView | null>(null);
+  const geoRef = useRef<GeoLocation | null>(null);
+  const openingFlownRef = useRef(false);
   const autoLocateCancelled = useRef(false);
   /* A shared view (?lat&lon&zoom&cam… — see lib/share-view): decoded once on
      load, and when present it replaces the home-base opening. The flight is
@@ -750,14 +756,58 @@ export default function Dashboard() {
     return () => clearTimeout(t);
   }, [splashStage, spooky]);
 
-  /* Fly from the globe down to home base (El Paso) once the splash has gone.
-     Starting as it began to fade meant a busy first load (the satellite
-     catalogue is ~19k objects) could hold the fade until the camera was
-     nearly at street level, and the globe was never seen. */
+  /* IP locate for the opening view: /api/geo answers from the host's geo
+     headers (city-level, no permission prompt, nothing stored server-side).
+     Fetched on mount, in parallel with the splash, so it never blocks the
+     opening. Skipped outright when a remembered view or a shared link already
+     decides the opening — no lookup is needed then. */
   useEffect(() => {
-    if (!splashGone || !homeLocation || autoLocateCancelled.current) return;
-    setFlyToLocation({ ...homeLocation, zoom: 9, duration: 3500, ts: Date.now() });
-  }, [splashGone, homeLocation]);
+    lastViewRef.current = readLastView();
+    if (lastViewRef.current) return;
+    if (decodeShareView(new URLSearchParams(window.location.search))) return;
+    let cancelled = false;
+    fetch('/api/geo', { signal: AbortSignal.timeout(8000) })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (!cancelled) geoRef.current = parseGeoResponse(d);
+      })
+      .catch(() => {
+        /* fall back to home base */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* Opening flight, once the splash has gone. Runs once; the shared-view
+     flight below is a separate effect, and a shared link cancels this one at
+     decode time. Starting as the splash began to fade meant a busy first load
+     (the satellite catalogue is ~19k objects) could hold the fade until the
+     camera was nearly at street level, and the globe was never seen. */
+  useEffect(() => {
+    if (!splashGone || openingFlownRef.current || autoLocateCancelled.current) return;
+    openingFlownRef.current = true;
+    const target = resolveOpeningTarget({ lastView: lastViewRef.current, geo: geoRef.current });
+    setFlyToLocation({ lat: target.lat, lng: target.lng, zoom: target.zoom, duration: 3500, ts: Date.now() });
+  }, [splashGone]);
+
+  /* Remember the last settled view, so return visits open where the visitor
+     left off. mapView only changes on moveend, so mid-flight states never
+     reach storage; the zoom guard keeps the initial globe view (zoom 2.5)
+     out, and the splash guard keeps the opening flight's own start out. */
+  const lastViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!splashGone) return;
+    const { latitude, longitude, zoom } = mapView;
+    if (zoom <= 3 || !isValidLatLon(latitude, longitude)) return;
+    if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
+    lastViewTimer.current = setTimeout(() => {
+      writeLastView({ lat: latitude, lng: longitude, zoom });
+    }, 1500);
+    return () => {
+      if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
+    };
+  }, [mapView, splashGone]);
 
   /* Shared view: once the splash has gone, fly to what the link names —
      centre, zoom and camera angle — instead of home base. Runs once; the
@@ -836,7 +886,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  // URL state: persist active layers only (the opening view is always home base, El Paso)
+  // URL state: persist active layers only (the opening view lives in localStorage, not the address)
   const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1982,6 +2032,13 @@ export default function Dashboard() {
               : <Moon className="w-4 h-4 text-white/60" />}
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">DAY / NIGHT</span>
+        </div>
+
+        <div className="relative group">
+          <button onClick={() => setFlyToLocation({ lat: HOME_BASE.lat, lng: HOME_BASE.lng, zoom: HOME_BASE.zoom, duration: 3500, ts: Date.now() })} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title="Home — fly back to El Paso, Glass Earth's home base" aria-label="Fly home to El Paso">
+            <Home className="w-4 h-4 text-white/60" />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">HOME — EL PASO</span>
         </div>
 
         <div className="relative group">

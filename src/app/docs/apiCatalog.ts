@@ -329,7 +329,7 @@ export const API_GROUPS: ApiGroup[] = [
       {
         path: '/api/geo',
         method: 'GET',
-        summary: 'Geolocates the calling client by IP.',
+        summary: 'Geolocates the calling client — host geo headers first, IP services as fallback.',
         returns: ['status', 'query', 'city', 'regionName', 'country', 'lat', 'lon', 'isp', 'org'],
       },
     ],
