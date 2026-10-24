@@ -3,6 +3,8 @@ import {
   ambientPool,
   FAVORITES_KEY,
   isWallPlayable,
+  pickRouletteCamera,
+  rouletteCandidates,
   loadAssignments,
   loadFavorites,
   loadLayout,
@@ -156,5 +158,63 @@ describe('persistence', () => {
     vi.unstubAllGlobals();
     expect(loadFavorites()).toEqual([]);
     expect(loadAssignments()).toBeNull();
+  });
+});
+
+describe('roulette', () => {
+  const still = (id: string, over: Partial<WallCamera> = {}) =>
+    cam({ id, feed_url: `https://a/${id}.jpg`, lat: 31.7, lng: -106.4, ...over });
+  const stream = (id: string, over: Partial<WallCamera> = {}) =>
+    cam({ id, stream_type: 'hls', stream_url: `https://a/${id}.m3u8`, lat: 51.5, lng: -0.12, ...over });
+
+  it('candidates must be playable AND have coordinates', () => {
+    const cameras = [
+      still('ok'),
+      cam({ id: 'no-coords', feed_url: 'https://a/x.jpg' }),
+      cam({ id: 'nan-coords', feed_url: 'https://a/x.jpg', lat: Number.NaN, lng: 0 }),
+      cam({ id: 'unplayable', lat: 1, lng: 1 }),
+      stream('stream-ok'),
+    ];
+    expect(rouletteCandidates(cameras).map(c => c.id)).toEqual(['ok', 'stream-ok']);
+  });
+
+  it('returns null when nothing can be landed on', () => {
+    expect(pickRouletteCamera([])).toBeNull();
+    expect(pickRouletteCamera([cam({ id: 'dead' })])).toBeNull();
+    expect(pickRouletteCamera([cam({ id: 'lost', feed_url: 'https://a/x.jpg' })])).toBeNull();
+  });
+
+  it('prefers continuous-motion cameras over stills', () => {
+    const cameras = [still('a'), still('b'), stream('live')];
+    /* Roll every position in the draw: only the stream may ever come up. */
+    for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+      expect(pickRouletteCamera(cameras, null, () => roll)?.id).toBe('live');
+    }
+  });
+
+  it('draws uniformly across the pool the rng selects', () => {
+    const cameras = [stream('s1'), stream('s2'), stream('s3')];
+    expect(pickRouletteCamera(cameras, null, () => 0)?.id).toBe('s1');
+    expect(pickRouletteCamera(cameras, null, () => 0.5)?.id).toBe('s2');
+    expect(pickRouletteCamera(cameras, null, () => 0.999)?.id).toBe('s3');
+    /* An out-of-range roll is clamped, never an undefined pick. */
+    expect(pickRouletteCamera(cameras, null, () => 1)?.id).toBe('s3');
+  });
+
+  it('never repeats the open camera while an alternative exists', () => {
+    const cameras = [stream('open'), stream('other-1'), stream('other-2')];
+    for (let i = 0; i < 50; i++) {
+      const roll = i / 50;
+      expect(pickRouletteCamera(cameras, 'open', () => roll)?.id).not.toBe('open');
+    }
+    /* Numeric ids and string exclusions compare by catalogue key. */
+    const numeric = [stream('7', { id: 7 }), stream('8', { id: 8 })];
+    expect(pickRouletteCamera(numeric, '7', () => 0)?.id).toBe(8);
+  });
+
+  it('falls back to stills when no motion camera exists, and to the sole candidate when exclusion empties the pool', () => {
+    const stills = [still('p1'), still('p2')];
+    expect(pickRouletteCamera(stills, null, () => 0.9)?.id).toBe('p2');
+    expect(pickRouletteCamera([stream('only')], 'only', () => 0)?.id).toBe('only');
   });
 });

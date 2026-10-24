@@ -176,6 +176,49 @@ export function ambientPool(cameras: WallCamera[], limit = 48): WallCamera[] {
 }
 
 /**
+ * The cameras the roulette can land on: playable in a tile (the same bar the
+ * wall sets) AND somewhere on Earth — a camera with no coordinates cannot be
+ * flown to, however good its picture is.
+ */
+export function rouletteCandidates(cameras: WallCamera[]): WallCamera[] {
+  return cameras.filter(
+    c => isWallPlayable(c) && Number.isFinite(c.lat) && Number.isFinite(c.lng),
+  );
+}
+
+/**
+ * "Take me somewhere live": one honest random draw from the catalogue.
+ *
+ * Continuous-motion cameras (HLS / MP4 / MJPEG — the Ambient TV set) are
+ * preferred: when any exist, the draw is made among them alone, because a
+ * roulette that lands on a still photograph feels broken. Within the pool
+ * the draw is uniform — no scenic weighting, no regional favouritism; the
+ * whole point is that it can land anywhere on the planet.
+ *
+ * `excludeId` is the camera already open: with any alternative available it
+ * is never drawn again. If it is the ONLY candidate, it is returned anyway —
+ * a repeated camera is a smaller failure than a button that does nothing.
+ * Returns null when the catalogue holds nothing landable at all (still
+ * loading, or every entry unplayable/coordinate-less).
+ */
+export function pickRouletteCamera(
+  cameras: WallCamera[],
+  excludeId?: string | null,
+  rng: () => number = Math.random,
+): WallCamera | null {
+  const candidates = rouletteCandidates(cameras);
+  if (!candidates.length) return null;
+  const motion = candidates.filter(isAmbientMotionCamera);
+  const pool = motion.length ? motion : candidates;
+  const excludeKey = excludeId != null && excludeId !== '' ? String(excludeId) : null;
+  const eligible = excludeKey ? pool.filter(c => cameraKey(c) !== excludeKey) : pool;
+  const draw = eligible.length ? eligible : pool;
+  const roll = rng();
+  const index = Math.min(draw.length - 1, Math.max(0, Math.floor((Number.isFinite(roll) ? roll : 0) * draw.length)));
+  return draw[index];
+}
+
+/**
  * The slice of `pool` showing at rotation step `tick`: whole pages, wrapping
  * around the end. With a pool no bigger than the page this is just the pool.
  */

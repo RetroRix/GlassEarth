@@ -72,10 +72,10 @@ interface OsirisMapProps {
   onEntityClick?: (entity: any) => void;
   onMouseCoords?: (coords: { lat: number; lng: number }) => void;
   onRightClick?: (coords: { lat: number; lng: number }) => void;
-  onViewStateChange?: (vs: { zoom: number; latitude: number }) => void;
+  onViewStateChange?: (vs: { zoom: number; latitude: number; longitude: number; bearing: number; pitch: number }) => void;
   /** `alertId` also opens that Live Alert's pin once the camera arrives.
    *  `duration` overrides the default 2 s flight. */
-  flyToLocation?: { lat: number; lng: number; zoom?: number; alertId?: string; duration?: number; ts: number } | null;
+  flyToLocation?: { lat: number; lng: number; zoom?: number; bearing?: number; pitch?: number; alertId?: string; duration?: number; ts: number } | null;
   /** Fires once, when the map has drawn its first complete frame. */
   onReady?: () => void;
   /** Which Live Alerts to pin — the reports the feed is showing. Null pins them all. */
@@ -969,7 +969,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         lastRightClick = { at: now, x, y };
       }
     });
-    const reportViewState = () => { const c = map.getCenter(); onViewStateChange?.({ zoom: map.getZoom(), latitude: c.lat }); };
+    const reportViewState = () => { const c = map.getCenter(); onViewStateChange?.({ zoom: map.getZoom(), latitude: c.lat, longitude: c.lng, bearing: map.getBearing(), pitch: map.getPitch() }); };
     map.on('load', reportViewState);
     map.on('moveend', reportViewState);
     // Lightweight settled-view diagnostics for camera/terrain regressions.
@@ -2419,7 +2419,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   useEffect(() => {
     if (!mapReady || !mapRef.current || !flyToLocation) return;
     const map = mapRef.current;
-    map.flyTo({ center: [flyToLocation.lng, flyToLocation.lat], zoom: flyToLocation.zoom ?? 8, duration: flyToLocation.duration ?? 2000 });
+    map.flyTo({
+      center: [flyToLocation.lng, flyToLocation.lat],
+      zoom: flyToLocation.zoom ?? 8,
+      duration: flyToLocation.duration ?? 2000,
+      ...(flyToLocation.bearing !== undefined ? { bearing: flyToLocation.bearing } : {}),
+      ...(flyToLocation.pitch !== undefined ? { pitch: flyToLocation.pitch } : {}),
+    });
     const alertId = flyToLocation.alertId;
     if (!alertId) return;
     const open = () => openAlertPinRef.current?.(alertId);

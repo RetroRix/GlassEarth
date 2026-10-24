@@ -3,9 +3,12 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
+import { pickRouletteCamera, type WallCamera } from '@/lib/theater-wall';
+import { decodeShareView, type SharedView } from '@/lib/share-view';
+import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -181,11 +184,14 @@ const hudIn = (delay: number) => ({ duration: 0.7, ease: HUD_EASE, delay });
 export default function Dashboard() {
   const dataRef = useRef<any>({});
   const [dataVersion, setDataVersion] = useState(0);
+  /* The catalogue's size as state, so controls can show a loading state
+     without reading the data ref during render. */
+  const [cameraCount, setCameraCount] = useState(0);
   const data = dataRef.current;
 
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
-  const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20 });
-  const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; zoom?: number; alertId?: string; duration?: number; ts: number } | null>(null);
+  const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20, longitude: 0, bearing: 0, pitch: 0 });
+  const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; zoom?: number; bearing?: number; pitch?: number; alertId?: string; duration?: number; ts: number } | null>(null);
   /* The Live Alerts the feed's filters leave showing; the map pins those. */
   const [pinnedAlertIds, setPinnedAlertIds] = useState<string[] | null>(null);
   const [globalStats, setGlobalStats] = useState<any>(null);
@@ -206,6 +212,13 @@ export default function Dashboard() {
      and flew there instead; this fork is a home-base dashboard.) */
   const [homeLocation] = useState<{ lat: number; lng: number }>({ lat: 31.7619, lng: -106.485 });
   const autoLocateCancelled = useRef(false);
+  /* A shared view (?lat&lon&zoom&cam… — see lib/share-view): decoded once on
+     load, and when present it replaces the home-base opening. The flight is
+     applied once the splash has gone; the camera opens when the catalogue
+     delivers it. */
+  const sharedViewRef = useRef<SharedView | null>(null);
+  const sharedViewFlownRef = useRef(false);
+  const sharedCamOpenedRef = useRef(false);
 
   const [activeCamera, setActiveCamera] = useState<any>(null);
   const [spaceWeather, setSpaceWeather] = useState<any>(null);
@@ -715,12 +728,51 @@ export default function Dashboard() {
     setFlyToLocation({ ...homeLocation, zoom: 9, duration: 3500, ts: Date.now() });
   }, [splashGone, homeLocation]);
 
+  /* Shared view: once the splash has gone, fly to what the link names —
+     centre, zoom and camera angle — instead of home base. Runs once; the
+     decode above already cancelled the home flight. */
+  useEffect(() => {
+    const view = sharedViewRef.current;
+    if (!splashGone || !view || sharedViewFlownRef.current) return;
+    sharedViewFlownRef.current = true;
+    oiGlobe.current?.follow(false);
+    if (view.cameraId) setActiveLayers(prev => (prev.cctv ? prev : { ...prev, cctv: true }));
+    setFlyToLocation({
+      lat: view.lat, lng: view.lng, zoom: view.zoom ?? 9,
+      bearing: view.bearing, pitch: view.pitch,
+      duration: 2600, ts: Date.now(),
+    });
+  }, [splashGone]);
+
+  /* Shared view: open the link's camera when the catalogue delivers it.
+     A camera the catalogue never brings simply never opens — the restored
+     view is the link's main promise, and it has already been kept. */
+  useEffect(() => {
+    const view = sharedViewRef.current;
+    if (!view?.cameraId || sharedCamOpenedRef.current) return;
+    const catalog = (dataRef.current.cameras ?? []) as Array<{ id: string | number }>;
+    const cam = catalog.find(c => String(c.id) === view.cameraId);
+    if (!cam) return;
+    sharedCamOpenedRef.current = true;
+    setActiveCamera({ ...cam, type: 'cctv' });
+  }, [dataVersion]);
+
   // On mount: restore layers and probe optional feeds
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     // Restore active layers from URL if present
     const p = new URLSearchParams(window.location.search);
+
+    // A shared view in the address replaces the home-base opening: decode it
+    // now (garbage decodes to null and the opening proceeds as always) and
+    // cancel the fly-home before it can be scheduled.
+    const shared = decodeShareView(p);
+    if (shared) {
+      sharedViewRef.current = shared;
+      autoLocateCancelled.current = true;
+    }
+
     const layers = p.get('layers');
     if (layers) {
       const active = layers.split(',');
@@ -890,6 +942,40 @@ export default function Dashboard() {
     }
   }, []);
 
+  // ── "TAKE ME SOMEWHERE LIVE" — the camera roulette ──
+  // One tap: a random playable camera somewhere on Earth (the draw itself is
+  // lib/theater-wall's pickRouletteCamera), flown to and opened in the viewer.
+  // Tapping again while a camera is open excludes that camera, so the spin
+  // always lands somewhere new.
+  const roulettePending = useRef(false);
+  const takeMeSomewhereLive = useCallback(() => {
+    const cameras = (dataRef.current.cameras ?? []) as WallCamera[];
+    const open = activeCamera?.type === 'cctv' ? activeCamera : null;
+    const currentId = open && open.id != null && open.id !== '' ? String(open.id) : null;
+    const pick = pickRouletteCamera(cameras, currentId);
+    if (!pick) {
+      /* Nothing landable yet — the catalogue is still loading, or CCTV is off
+         so it never started. Turning the layer on is what loads it; remember
+         the ask and the spin completes itself when the first cameras land. */
+      roulettePending.current = true;
+      setActiveLayers(prev => (prev.cctv ? prev : { ...prev, cctv: true }));
+      return;
+    }
+    oiGlobe.current?.follow(false);
+    setActiveLayers(prev => (prev.cctv ? prev : { ...prev, cctv: true }));
+    setFlyToLocation({ lat: Number(pick.lat), lng: Number(pick.lng), zoom: 13, duration: 2400, ts: Date.now() });
+    setActiveCamera({ ...pick, type: 'cctv' });
+  }, [activeCamera]);
+
+  /* A spin asked for while the catalogue was still loading completes itself
+     when the first batch lands. */
+  useEffect(() => {
+    if (!roulettePending.current) return;
+    if (!((dataRef.current.cameras?.length ?? 0) > 0)) return;
+    roulettePending.current = false;
+    takeMeSomewhereLive();
+  }, [dataVersion, takeMeSomewhereLive]);
+
   // ── Drawing / AOI ──
   // OsirisMap already owns the draw interaction and the polygon rendering;
   // this only turns a finished ring into a measured, named, coloured record.
@@ -1047,6 +1133,7 @@ export default function Dashboard() {
         ...dataRef.current,
         cameras: mergeCameraCatalog(dataRef.current.cameras ?? [], cameras),
       };
+      setCameraCount(dataRef.current.cameras?.length ?? 0);
       setDataVersion(value => value + 1);
       setBackendStatus('connected');
     }, () => console.warn('[OSIRIS] Camera catalogue load failed; bounded retry scheduled'));
@@ -1360,6 +1447,20 @@ export default function Dashboard() {
   const totalFlights = useMemo(() => (
     (data.commercial_flights?.length||0)+(data.private_flights?.length||0)+(data.private_jets?.length||0)+(data.military_flights?.length||0)
   ), [data.commercial_flights, data.private_flights, data.private_jets, data.military_flights]);
+
+  /* What a share link would carry right now: the map's real centre (the
+     settled view state, not the cursor), and the open camera when the
+     viewer is showing one. */
+  const shareView = {
+    lat: mapCenter?.lat ?? mapView.latitude,
+    lng: mapCenter?.lng ?? mapView.longitude,
+    zoom: mapView.zoom,
+    bearing: mapView.bearing,
+    pitch: mapView.pitch,
+  };
+  const shareCameraId = activeCamera?.type === 'cctv' && activeCamera?.id != null && activeCamera?.id !== ''
+    ? String(activeCamera.id) : null;
+  const shareCameraName = shareCameraId ? (activeCamera?.name ?? null) : null;
 
 
   return (
@@ -1763,6 +1864,12 @@ export default function Dashboard() {
       </motion.div>
 
 
+      {/* ── LIVE COUNTER STRIP ── */}
+      <motion.div data-hud initial={{ opacity: 0, y: -8 }} animate={revealed ? { opacity: 1, y: 0 } : { opacity: 0, y: -8 }} transition={hudIn(0.4)} className="absolute z-[190] pointer-events-none" style={{ left: isMobile ? '24px' : '108px', top: isMobile ? '82px' : '96px' }}>
+        <LiveCounterStrip dataRef={dataRef} />
+      </motion.div>
+
+
       {/* ── TOP-RIGHT STATUS (desktop) ── */}
       <motion.div data-hud initial={{ opacity: 0 }} animate={{ opacity: revealed ? 1 : 0 }} transition={hudIn(0.35)} className="status-bar-desktop absolute top-4 right-6 z-[200] pointer-events-none flex items-center gap-3 text-[10px] font-mono tracking-widest text-[var(--text-muted)]">
 
@@ -1816,6 +1923,15 @@ export default function Dashboard() {
               : <Moon className="w-4 h-4 text-white/60" />}
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">DAY / NIGHT</span>
+        </div>
+
+        <div className="relative group">
+          <button onClick={takeMeSomewhereLive} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title={cameraCount > 0 ? 'Take me somewhere live — a random live camera, somewhere on Earth' : 'Take me somewhere live — the camera catalogue is still loading'} aria-label="Take me somewhere live">
+            {cameraCount > 0
+              ? <Dices className="w-4 h-4 text-white/60" />
+              : <span aria-hidden="true" className="block w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-transparent animate-spin" />}
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SOMEWHERE LIVE</span>
         </div>
 
         <div className="relative group">
@@ -1973,6 +2089,10 @@ export default function Dashboard() {
             )}
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SEARCH</span>
+        </div>
+
+        <div className="relative">
+          <SharePanel view={shareView} activeLayers={activeLayers} cameraId={shareCameraId} cameraName={shareCameraName} withShortcut={false} />
         </div>
 
         {/* Separator */}
@@ -2208,6 +2328,16 @@ export default function Dashboard() {
                   {mobilePanel === 'tv' && (
                     <div className="space-y-2 pb-1">
                       <button
+                        onClick={() => { setMobilePanel(null); takeMeSomewhereLive(); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <Dices className="h-4 w-4 shrink-0 text-[var(--gold-primary)]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">Take me somewhere live</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">{cameraCount > 0 ? 'A random live camera — somewhere on Earth' : 'Camera catalogue still loading…'}</span>
+                        </span>
+                      </button>
+                      <button
                         onClick={() => { setMobilePanel(null); setShowTv(true); }}
                         className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
                       >
@@ -2280,7 +2410,7 @@ export default function Dashboard() {
                   {mobilePanel === 'search' && (
                     <div className="space-y-2">
                       <SearchBar embedded center={mapCenter} onDirections={openDirectionsTo} onLocate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
-                      <SharePanel mapView={mapView} activeLayers={activeLayers} mouseCoords={null} />
+                      <SharePanel view={shareView} activeLayers={activeLayers} cameraId={shareCameraId} cameraName={shareCameraName} />
                     </div>
                   )}
                   {mobilePanel === 'remote' && (

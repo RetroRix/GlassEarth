@@ -2,36 +2,36 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Share2, Copy, Check, Link2, X, Globe, MapPin } from 'lucide-react';
+import { Share2, Copy, Check, Link2, X, Globe, MapPin, Video } from 'lucide-react';
+import { buildShareUrl } from '@/lib/share-view';
 
 interface SharePanelProps {
-  mapView: { zoom: number; latitude: number; longitude?: number };
+  /** Where the map is actually standing: centre, zoom, and (when the map
+   *  reports them) bearing and pitch. */
+  view: { lat: number; lng: number; zoom: number; bearing?: number; pitch?: number };
   activeLayers: Record<string, boolean>;
-  mouseCoords?: { lat: number; lng: number } | null;
+  /** The camera open in the viewer, if any: the link reopens it. */
+  cameraId?: string | null;
+  cameraName?: string | null;
+  /** The [S] shortcut is the panel's own only where nothing else owns the
+   *  key — on desktop the page's [S] is Search, so the strip instance
+   *  passes false rather than fighting it. */
+  withShortcut?: boolean;
 }
 
-export default function SharePanel({ mapView, activeLayers, mouseCoords }: SharePanelProps) {
+export default function SharePanel({ view, activeLayers, cameraId, cameraName, withShortcut = true }: SharePanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const generateShareUrl = useCallback(() => {
-    const params = new URLSearchParams();
-    const lat = mouseCoords?.lat ?? mapView.latitude ?? 20;
-    const lng = mouseCoords?.lng ?? mapView.longitude ?? 0;
-    params.set('lat', lat.toFixed(4));
-    params.set('lon', lng.toFixed(4));
-    params.set('zoom', mapView.zoom.toFixed(2));
-
     // Encode active layers as compact string
     const layerKeys = Object.entries(activeLayers)
       .filter(([, v]) => v)
       .map(([k]) => k)
       .join(',');
-    if (layerKeys) params.set('layers', layerKeys);
-
-    const base = typeof window !== 'undefined' ? window.location.origin : 'https://osiris.vercel.app';
-    return `${base}/?${params.toString()}`;
-  }, [mapView, activeLayers, mouseCoords]);
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.glassearthlive.com';
+    return buildShareUrl(origin, { ...view, cameraId: cameraId ?? undefined }, layerKeys || undefined);
+  }, [view, activeLayers, cameraId]);
 
   const copyToClipboard = useCallback(async () => {
     const url = generateShareUrl();
@@ -54,6 +54,7 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
 
   // Keyboard shortcut
   useEffect(() => {
+    if (!withShortcut) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 's' && !e.ctrlKey && !e.metaKey && !['INPUT', 'TEXTAREA'].includes((e.target as Element)?.tagName)) {
         setIsOpen(p => !p);
@@ -61,7 +62,7 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [withShortcut]);
 
   return (
     <>
@@ -71,7 +72,9 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
         className="glass-panel w-8 h-8 flex items-center justify-center pointer-events-auto hover:border-[var(--gold-primary)] transition-colors"
-        title="Share view (S)"
+        title={withShortcut ? 'Share view (S)' : 'Share view'}
+        aria-label="Share this view"
+        aria-expanded={isOpen}
       >
         <Share2 className="w-3.5 h-3.5 text-[var(--gold-primary)]" />
       </motion.button>
@@ -102,11 +105,19 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
                 <span className="text-[9px] font-mono text-[var(--text-muted)] tracking-widest">CURRENT VIEW</span>
               </div>
               <div className="text-[9px] font-mono text-[var(--text-secondary)]">
-                {mouseCoords ? `${mouseCoords.lat.toFixed(4)}°, ${mouseCoords.lng.toFixed(4)}°` : '—'} · Zoom {mapView.zoom.toFixed(1)}
+                {view.lat.toFixed(4)}°, {view.lng.toFixed(4)}° · Zoom {view.zoom.toFixed(1)}
               </div>
               <div className="text-[9px] font-mono text-[var(--text-muted)] mt-1">
                 {Object.values(activeLayers).filter(Boolean).length} layers active
               </div>
+              {cameraId && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <Video className="w-2.5 h-2.5 text-[var(--gold-primary)] shrink-0" />
+                  <span className="text-[9px] font-mono text-[var(--text-secondary)] truncate">
+                    Link reopens: {cameraName || 'the open camera'}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Share URL */}
@@ -122,10 +133,16 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
                 <button
                   onClick={copyToClipboard}
                   className={`px-3 py-1.5 rounded text-[9px] font-mono tracking-widest transition-all ${copied ? 'bg-[var(--alert-green)]/20 text-[var(--alert-green)] border border-[var(--alert-green)]/30' : 'bg-[var(--gold-primary)]/10 text-[var(--gold-primary)] border border-[var(--gold-primary)]/30 hover:bg-[var(--gold-primary)]/20'}`}
+                  aria-label={copied ? 'Link copied' : 'Copy share link'}
                 >
                   {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                 </button>
               </div>
+              {copied && (
+                <div className="mt-1.5 text-[9px] font-mono text-[var(--alert-green)] tracking-widest" role="status">
+                  LINK COPIED — WHOEVER OPENS IT LANDS HERE
+                </div>
+              )}
             </div>
 
             {/* Quick Share */}
@@ -154,7 +171,7 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
             </div>
 
             <div className="mt-3 text-center text-[9px] font-mono text-[var(--text-muted)] tracking-widest">
-              PRESS [S] TO TOGGLE · SHAREABLE LINKS PRESERVE VIEW STATE
+              {withShortcut ? 'PRESS [S] TO TOGGLE · ' : ''}SHAREABLE LINKS PRESERVE VIEW STATE
             </div>
           </motion.div>
         )}
