@@ -45,6 +45,11 @@ function layout(pt: { x: number; y: number }, width: number, height: number) {
 
 /** Whatever the camera layer is currently drawn in — see lib/map-palette. */
 const CAM = 'var(--map-cctv)';
+/** The same green as it reads on the tiles' own black chips. The day theme
+ *  darkens --map-cctv for the pale basemap, which goes muddy on the black
+ *  caption bar; --map-cctv-on-dark keeps the bright value there. On the
+ *  dark themes the two properties hold the same colour, so nothing moves. */
+const CAM_ON_DARK = 'var(--map-cctv-on-dark)';
 /** color-mix keeps every tint tied to that property, not to a frozen hex. */
 const cam = (pct: number) => `color-mix(in srgb, ${CAM} ${pct}%, transparent)`;
 
@@ -250,7 +255,7 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
         {/* Hover only: the tile is already a button, this says what it opens. */}
         <div
           className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-1 bg-black/70 px-1 py-[1px] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-          style={{ color: CAM }}
+          style={{ color: CAM_ON_DARK }}
         >
           <Maximize2 className="h-2 w-2" />
           <span className="font-mono text-[7px] tracking-[0.18em]">OPEN</span>
@@ -278,10 +283,10 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
           height: LABEL_H,
           border: `1px solid ${cam(40)}`,
           borderTop: 'none',
-          color: CAM,
+          color: CAM_ON_DARK,
         }}
       >
-        <span className="h-1 w-1 shrink-0 rounded-full" style={{ background: CAM, boxShadow: `0 0 5px ${CAM}` }} />
+        <span className="h-1 w-1 shrink-0 rounded-full" style={{ background: CAM_ON_DARK, boxShadow: `0 0 5px ${CAM_ON_DARK}` }} />
         <span className="truncate">{camera.name}</span>
       </div>
     </button>

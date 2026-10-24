@@ -52,6 +52,20 @@ const CLICKABLE_LAYERS: ReadonlySet<string> = new Set(['cctv-dots','eq-circles',
   'cf-outage-dots','cf-attack-dots','flight-dots','military-dots','jet-dots','private-dots','alert-pin-dots',
   'transit-coverage-dots']);
 
+/* Camera-name labels under the DAY theme. The label otherwise takes the
+   camera palette colour, which in day is a mid green picked for the dots:
+   at 9px over Positron's pale ground the names washed out. Day gets its
+   own treatment — deep green, white halo, full opacity, a step larger.
+   Core and ghost keep the original label paint exactly; only the day
+   branches below consult this. */
+const CCTV_LABEL_DAY = {
+  color: '#0A4D2E',
+  halo: '#FFFFFF',
+  haloWidth: 2,
+  opacity: 1,
+  size: 11,
+} as const;
+
 interface OsirisMapProps {
   data: any;
   activeLayers: Record<string, boolean>;
@@ -522,9 +536,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }});
       // CCTV — labels at zoom 10+
       map.addLayer({ id: 'cctv-label', type: 'symbol', source: 'cctv', minzoom: 10, layout: {
-        'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-field': ['get','name'], 'text-size': theme === 'day' ? CCTV_LABEL_DAY.size : 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.8], 'text-max-width': 12, 'text-allow-overlap': false,
-      }, paint: { 'text-color': cameraColor, 'text-halo-color': '#000000', 'text-halo-width': 1.5, 'text-opacity': 0.8 }});
+      }, paint: theme === 'day'
+        ? { 'text-color': CCTV_LABEL_DAY.color, 'text-halo-color': CCTV_LABEL_DAY.halo, 'text-halo-width': CCTV_LABEL_DAY.haloWidth, 'text-opacity': CCTV_LABEL_DAY.opacity }
+        : { 'text-color': cameraColor, 'text-halo-color': '#000000', 'text-halo-width': 1.5, 'text-opacity': 0.8 }});
 
       // GDELT
 
@@ -1881,8 +1897,20 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!mapReady || !mapRef.current) return;
       const map = mapRef.current;
       if (map.getLayer('cctv-dots')) map.setPaintProperty('cctv-dots', 'circle-color', palette.cctv);
-      if (map.getLayer('cctv-label')) map.setPaintProperty('cctv-label', 'text-color', palette.cctv);
-    }, [mapReady, palette.cctv]);
+      if (map.getLayer('cctv-label')) {
+        if (theme === 'day') {
+          /* Re-assert the day label treatment rather than pushing the
+             palette colour: that colour is the dot colour, and it is
+             what washed out over the light basemap. */
+          map.setPaintProperty('cctv-label', 'text-color', CCTV_LABEL_DAY.color);
+          map.setPaintProperty('cctv-label', 'text-halo-color', CCTV_LABEL_DAY.halo);
+          map.setPaintProperty('cctv-label', 'text-halo-width', CCTV_LABEL_DAY.haloWidth);
+          map.setPaintProperty('cctv-label', 'text-opacity', CCTV_LABEL_DAY.opacity);
+        } else {
+          map.setPaintProperty('cctv-label', 'text-color', palette.cctv);
+        }
+      }
+    }, [mapReady, palette.cctv, theme]);
 
   // ── DECOUPLED LAYER RENDERERS (Performance Optimized) ──
 
