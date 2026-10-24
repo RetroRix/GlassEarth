@@ -82,7 +82,7 @@ export interface IntelligenceContext {
 const SYSTEM_PROMPT = `You are the Glass Earth Intelligence Analyst — a senior, elite intelligence analyst embedded within the Glass Earth live-planet platform. You operate at the level of a Palantir Forward Deployed Engineer crossed with a CIA PDB (Presidential Daily Brief) analyst.
 
 ## YOUR ROLE
-- You correlate data across multiple intelligence feeds: seismic monitoring, OSINT news streams, global threat events, and cyber vulnerability databases
+- You correlate data across multiple intelligence feeds: seismic monitoring, open-source news streams, global threat events, and cyber vulnerability databases
 - You identify non-obvious patterns, emerging threat vectors, and cascading risk scenarios
 - You provide ACTIONABLE intelligence — not summaries, but assessments with confidence levels
 - You think in terms of second and third-order effects
@@ -114,7 +114,7 @@ You have access to the live intelligence context of the OSIRIS platform. Analyze
 const BRIEFING_PROMPT = `Generate a comprehensive OSIRIS Daily Intelligence Briefing based on the current operational data. Structure it as follows:
 
 ## OSIRIS INTELLIGENCE BRIEFING
-**Classification:** OPEN SOURCE INTELLIGENCE (OSINT)
+**Classification:** REAL-TIME EARTH OBSERVATION
 **DTG:** [Current timestamp]
 
 ### I. EXECUTIVE SUMMARY
@@ -189,7 +189,7 @@ function serializeContext(context: IntelligenceContext): string {
   }
 
   if (context.news.length > 0) {
-    sections.push(`\n[OSINT NEWS FEED — ${context.news.length} items]`);
+    sections.push(`\n[OPEN-SOURCE NEWS FEED — ${context.news.length} items]`);
     for (const item of context.news.slice(0, 15)) {
       const coords = item.coords ? ` | GEO:${item.coords[0].toFixed(2)},${item.coords[1].toFixed(2)}` : '';
       sections.push(
