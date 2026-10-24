@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Maximize2 } from 'lucide-react';
-import { freshen, previewMedia, refreshInterval, VIDEO_KINDS, type PreviewKind } from '@/lib/camera-preview';
+import { freshen, previewMedia, refreshInterval, snapshotFallbackMedia, VIDEO_KINDS, type PreviewKind } from '@/lib/camera-preview';
 import { layoutTile, tileHeight, tilesOverlap, type TileGeometry } from '@/lib/map-tile-layout';
 import type { Map as MlMap } from 'maplibre-gl';
 
@@ -192,15 +192,26 @@ function VideoMedia({ cam: camera, onReady, onFail }: MediaProps) {
 function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: PreviewCamera) => void }) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [degraded, setDegraded] = useState(false);
 
   /* No reset needed on the way in: each tile is keyed by camera id, so a slot
      changing hands remounts this component with fresh state. */
   const onReady = useCallback(() => setLoaded(true), []);
-  const onFail = useCallback(() => setFailed(true), []);
+  /* A dead stream degrades to the snapshot when one exists — a stale Caltrans
+     stream name still shows a picture. Only a camera with nothing to show at
+     all vanishes. */
+  const onFail = useCallback(() => {
+    if (!degraded && VIDEO_KINDS.has(camera.media.kind) && camera.feed_url) setDegraded(true);
+    else setFailed(true);
+  }, [degraded, camera]);
 
   /* A camera that will not load is worse than no tile: it is a broken box
      sitting over the map claiming to be a feed. */
   if (failed) return null;
+
+  const shownCam = degraded
+    ? { ...camera, media: snapshotFallbackMedia(camera) ?? camera.media }
+    : camera;
 
   return (
     <button
@@ -218,9 +229,9 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
         }}
       >
         <div className="h-full w-full transition-opacity duration-500" style={{ opacity: loaded ? 1 : 0 }}>
-          {VIDEO_KINDS.has(camera.media.kind)
+          {VIDEO_KINDS.has(camera.media.kind) && !degraded
             ? <VideoMedia cam={camera} onReady={onReady} onFail={onFail} />
-            : <ImageMedia cam={camera} onReady={onReady} onFail={onFail} />}
+            : <ImageMedia cam={shownCam} onReady={onReady} onFail={onFail} />}
         </div>
 
         {/* Two cosmetic passes over the picture: scanlines, for the same CRT

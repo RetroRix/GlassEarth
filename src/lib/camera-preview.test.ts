@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { previewMedia, refreshInterval, VIDEO_KINDS, type PreviewKind } from './camera-preview';
+import { previewMedia, refreshInterval, snapshotFallbackMedia, VIDEO_KINDS, type PreviewKind } from './camera-preview';
 
 describe('previewMedia', () => {
   it('treats a missing stream_type as a snapshot, like the full viewer', () => {
@@ -69,5 +69,18 @@ describe('VIDEO_KINDS', () => {
   it('is exactly the kinds that need a video element', () => {
     const kinds: PreviewKind[] = ['jpg', 'mjpeg', 'mp4', 'hls'];
     expect(kinds.filter(k => VIDEO_KINDS.has(k))).toEqual(['mp4', 'hls']);
+  });
+});
+
+describe('snapshotFallbackMedia', () => {
+  it('returns the still as a jpg when a video fails and a snapshot exists', () => {
+    expect(snapshotFallbackMedia({ feed_url: 'https://x/cam.jpg' }))
+      .toEqual({ kind: 'jpg', url: 'https://x/cam.jpg' });
+  });
+
+  it('returns null when there is no still to fall back to', () => {
+    expect(snapshotFallbackMedia({})).toBeNull();
+    expect(snapshotFallbackMedia({ feed_url: '' })).toBeNull();
+    expect(snapshotFallbackMedia({ feed_url: '   ' })).toBeNull();
   });
 });

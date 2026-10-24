@@ -20,6 +20,10 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  /* Which camera degraded to its snapshot. Keyed by id, so a new camera
+     starts clean by construction — no reset effect needed. */
+  const [degradedFor, setDegradedFor] = useState<string | null>(null);
+  const degraded = Boolean(camera && degradedFor === camera.id);
   const [retryCount, setRetryCount] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -82,7 +86,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
     return () => { live = false; };
   }, [resolveKey]);
 
-  const streamType = resolvedEmbed ? 'iframe' : (camera?.stream_type || 'jpg');
+  const streamType = degraded ? 'jpg' : resolvedEmbed ? 'iframe' : (camera?.stream_type || 'jpg');
   const streamUrl: string | undefined = resolvedEmbed || camera?.stream_url;
   const view = offPlatformView({ hostedOffPlatform, resolving, resolvedEmbed, offline });
   const externalOnly = view !== 'inline';
@@ -115,7 +119,10 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
           videoRef.current?.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) setError(true);
+          /* A dead stream degrades to the snapshot when one exists — a stale
+             Caltrans stream name still shows a picture. Only a camera with
+             nothing to fall back to gets the FEED UNAVAILABLE card. */
+          if (data.fatal) { if (camera.feed_url) setDegradedFor(camera.id); else setError(true); }
         });
       } else if (videoRef.current?.canPlayType('application/vnd.apple.mpegurl')) {
         videoRef.current.src = camera.stream_url;
@@ -312,7 +319,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                   <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center mb-2 mx-auto"><Camera className="w-4 h-4 text-red-400" /></div>
                   <span className="text-[10px] font-mono text-red-400 tracking-widest block mb-1">FEED UNAVAILABLE</span>
                   <span className="text-[9px] font-mono text-[var(--text-muted)]">Camera may be offline or restricted</span>
-                  <button onClick={() => { setError(false); setRetryCount(c => c + 1); }} className="block mx-auto mt-3 px-3 py-1 text-[9px] font-mono text-[#7E57C2] border border-[#7E57C2]/30 rounded hover:bg-[#7E57C2]/10 transition-colors tracking-wider">
+                  <button onClick={() => { setError(false); setDegradedFor(null); setRetryCount(c => c + 1); }} className="block mx-auto mt-3 px-3 py-1 text-[9px] font-mono text-[#7E57C2] border border-[#7E57C2]/30 rounded hover:bg-[#7E57C2]/10 transition-colors tracking-wider">
                     RETRY
                   </button>
                 </div>
@@ -324,6 +331,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                 autoPlay
                 muted
                 playsInline
+                onError={() => { if (camera?.feed_url) setDegradedFor(camera.id); else setError(true); }}
               />
             ) : streamType === 'mjpeg' && camera.stream_url ? (
               <img

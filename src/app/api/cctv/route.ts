@@ -76,6 +76,9 @@ import { fetchSouthCarolinaCameras } from './southcarolina';
 import { fetchSouthDakotaCameras } from './southdakota';
 import { fetchTennesseeCameras } from './tennessee';
 import { fetchVirginiaCameras } from './virginia';
+import { fetchWSDOTCameras } from './washington';
+import { fetchCaltransCameras } from './california';
+import { fetchSeattleCameras } from './seattle';
 import { fetchWestVirginiaCameras } from './westvirginia';
 import { fetchWisconsinCameras } from './wisconsin';
 import { fetchWyomingCameras } from './wyoming';
@@ -120,49 +123,10 @@ async function fetchTfLCameras(): Promise<any[]> {
   } catch (e) { return []; }
 }
 
-// ── US-WEST: WSDOT Washington State (~500) ──
-async function fetchWSDOTCameras(): Promise<any[]> {
-  try {
-    const res = await stealthFetch('https://data.wsdot.wa.gov/log/public/cameras.json', { signal: AbortSignal.timeout(12000) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data || []).map((cam: any) => ({
-      id: `wsdot-${cam.CameraID}`, lat: cam.CameraLocation?.Latitude, lng: cam.CameraLocation?.Longitude,
-      name: cam.Title || 'WSDOT Camera', city: 'Washington', country: 'US',
-      feed_url: cam.ImageURL || '', source: 'WSDOT',
-    })).filter((c: any) => c.lat && c.lng && c.feed_url);
-  } catch (e) { return []; }
-}
-
-// ── US-WEST: Caltrans California ──
-async function fetchCaltransCameras(): Promise<any[]> {
-  try {
-    const res = await stealthFetch('https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CCTV/FeatureServer/0/query?where=1%3D1&outFields=*&f=json', { signal: AbortSignal.timeout(12000) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const cams = [];
-    for (const feature of (data?.features || [])) {
-      const p = feature.attributes;
-      const lat = p.latitude;
-      const lng = p.longitude;
-      const url = p.currentImageURL;
-      if (!lat || !lng || !url) continue;
-      cams.push({
-        id: `cal-${p.OBJECTID}`,
-        lat,
-        lng,
-        name: p.locationName || 'Caltrans',
-        city: p.nearbyPlace || p.county || 'California',
-        country: 'US',
-        feed_url: url,
-        source: 'Caltrans'
-      });
-    }
-    return cams;
-  } catch (e) {
-    return [];
-  }
-}
+// ── US-WEST: WSDOT Washington State + Caltrans California ──
+// Both live in their own modules now: ./washington (WSDOT's FeatureServer,
+// after the old cameras.json endpoint went 404) and ./california (Caltrans,
+// which also wires each row's published HLS stream — see those files).
 
 /**
  * One sub-source of a multi-source region, fetched with a single retry.
@@ -523,6 +487,7 @@ const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'southdakota': fetchSouthDakotaCameras,
   'tennessee': fetchTennesseeCameras,
   'virginia': fetchVirginiaCameras,
+  'seattle': fetchSeattleCameras,
   'westvirginia': fetchWestVirginiaCameras,
   'wisconsin': fetchWisconsinCameras,
   'wyoming': fetchWyomingCameras,
@@ -826,6 +791,8 @@ function getRegionsForBounds(lat: number, lng: number, radius: number): string[]
   if (lat > 36.9 && lat < 42.1 && lng > -114.2 && lng < -108.9) regions.push('utah');
   // Oregon (ODOT) — explicit, since us-west only covers WA + CA
   if (lat > 41.9 && lat < 46.3 && lng > -124.6 && lng < -116.4) regions.push('oregon');
+  // Seattle (SDOT) — explicit, since us-west carries WSDOT + Caltrans only
+  if (lat > 47.3 && lat < 47.9 && lng > -122.6 && lng < -122.1) regions.push('seattle');
   // Nevada (NDOT) — explicit, since us-west only covers WA + CA
   if (lat > 34.9 && lat < 42.1 && lng > -120.1 && lng < -113.9) regions.push('nevada');
   // Texas (TxDOT), including El Paso west of the central region.

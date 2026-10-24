@@ -55,6 +55,20 @@ export function previewMedia(cam: PreviewSource): { kind: PreviewKind; url: stri
   return null;
 }
 
+/**
+ * The snapshot to fall back to when a camera's declared video fails.
+ *
+ * A live stream that 404s (a stale Caltrans stream name, a retired Seattle
+ * camera) must degrade to the camera's still image, never to an empty tile.
+ * Returns null when there is no still to fall back to — Seattle's cameras
+ * are stream-only, so their dead streams are filtered at fetch time instead
+ * (see app/api/cctv/seattle).
+ */
+export function snapshotFallbackMedia(cam: { feed_url?: string }): { kind: PreviewKind; url: string } | null {
+  const url = typeof cam.feed_url === 'string' ? cam.feed_url.trim() : '';
+  return url ? { kind: 'jpg', url } : null;
+}
+
 /** Cache-buster: snapshot feeds are one URL that returns a new frame each time. */
 export function freshen(url: string): string {
   return url.includes('?') ? `${url}&_t=${Date.now()}` : `${url}?_t=${Date.now()}`;

@@ -216,6 +216,7 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
   variant?: 'tile' | 'ambient';
 }) {
   const [failed, setFailed] = useState(false);
+  const [degraded, setDegraded] = useState(false);
   const media = wallMedia(cam);
   const name = cam.name ?? 'CAMERA';
   const ambient = variant === 'ambient';
@@ -228,6 +229,16 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
   }
   if (!media) {
     return <Still icon={<CameraOff className="h-5 w-5 text-white/35" />} title="No direct feed" sub="This camera opens in the full viewer" />;
+  }
+
+  /* A dead stream degrades to the snapshot when one exists — a stale Caltrans
+     stream name still shows a picture. Only a camera with nothing to show at
+     all goes blank. */
+  if (degraded && cam.feed_url) {
+    const el = (
+      <SnapshotMedia url={cam.feed_url} kind="jpg" name={name} onFail={() => setFailed(true)} imgClassName={fit} crossfade={ambient} kenBurns={ambient} />
+    );
+    return ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
   }
 
   const isVideo = media.kind === 'mp4' || media.kind === 'hls' || media.kind === 'iframe';
@@ -255,7 +266,7 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
     return ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
   }
   if (media.kind === 'mp4' || media.kind === 'hls') {
-    const el = <VideoMedia url={media.url} kind={media.kind} onFail={() => setFailed(true)} fitClass={fit} />;
+    const el = <VideoMedia url={media.url} kind={media.kind} onFail={() => { if (cam.feed_url) setDegraded(true); else setFailed(true); }} fitClass={fit} />;
     return ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
   }
   return (
