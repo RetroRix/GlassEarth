@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
-import { scenicPool, type WallCamera } from '@/lib/theater-wall';
+import { ambientPool, type WallCamera } from '@/lib/theater-wall';
 import CameraTileMedia from './CameraTileMedia';
 
 /**
@@ -15,6 +15,13 @@ import CameraTileMedia from './CameraTileMedia';
  * screensaver for a television that happens to be showing the real planet —
  * beaches, harbours, falls and skylines from the public-webcam catalogue,
  * scored for scenery in lib/theater-wall.
+ *
+ * The pool is ordered for a television (lib/theater-wall's ambientPool):
+ * cameras that actually move — live streams — lead, and snapshot cameras
+ * only fill the slots the streams cannot, because a still that refreshes
+ * every 15 seconds reads as a stutter on a big screen. The frame is shown
+ * whole over a blurred copy of itself rather than cropped to fill, and
+ * the stills that do appear crossfade and drift instead of jump-cutting.
  *
  * Behaviour follows screensaver rules: it asks for real fullscreen on the
  * way in, any key leaves, and the overlay (place, clock, exit) appears when
@@ -48,8 +55,12 @@ export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
   }, []);
 
   /* The current place is derived from the pool, never stored: the pool grows
-     as the catalogue streams in, and the index simply rides along. */
-  const pool = scenicPool(catalog);
+     as the catalogue streams in, and the index simply rides along.
+     Memoised on the catalogue — the clock below re-renders this component
+     every second, and a freshly-computed pool array would read as a new
+     dependency to the rotation effect, resetting its 45-second timer on
+     every tick so no scene would ever rotate away. */
+  const pool = useMemo(() => ambientPool(catalog), [catalog]);
   const current = pool.length ? pool[index % pool.length] : null;
   const clock = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const dateLine = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
@@ -137,7 +148,7 @@ export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
           /* Keyed by camera id: a new place mounts a fresh player rather
              than re-pointing the old one mid-fade. */
           <div key={String(current.id)} className="h-full w-full">
-            <CameraTileMedia cam={current} />
+            <CameraTileMedia cam={current} variant="ambient" />
           </div>
         )}
       </div>

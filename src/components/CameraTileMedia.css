@@ -1,0 +1,19 @@
+/* ═══════════════════════════════════════════════════════════════
+   AMBIENT TV STILLS — the Ken Burns drift (CameraTileMedia.tsx)
+   A snapshot scene sits on screen for 45 seconds; a photograph
+   that never moves reads as a frozen app, so stills in Ambient
+   mode drift — a few percent of scale and travel over half a
+   minute, transform-only so the compositor does all the work.
+   Gated on no-preference: viewers who ask for reduced motion
+   get a still that is honestly still.
+   ═══════════════════════════════════════════════════════════════ */
+@keyframes ambient-kenburns {
+  from { transform: scale(1.03) translate(0.6%, -0.4%); }
+  to { transform: scale(1.12) translate(-1.4%, 1%); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ambient-kenburns {
+    animation: ambient-kenburns 36s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+}

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ambientPool,
   FAVORITES_KEY,
   isWallPlayable,
   loadAssignments,
@@ -59,6 +60,60 @@ describe('scenicPool', () => {
   it('falls back to any playable camera when nothing scores', () => {
     const cameras = [cam({ id: 'road', source: 'WSDOT', name: 'I-5 Interchange', feed_url: 'https://a/r.jpg' })];
     expect(scenicPool(cameras).map(c => c.id)).toEqual(['road']);
+  });
+});
+
+describe('ambientPool', () => {
+  it('leads with continuous motion ahead of a higher-scored still', () => {
+    const cameras = [
+      cam({ id: 'still', source: 'Public Webcam', name: 'Beach', feed_url: 'https://a/s.jpg' }),
+      cam({ id: 'stream', source: 'Port', name: 'Harbour', stream_type: 'mjpeg', stream_url: 'https://a/m.mjpeg' }),
+    ];
+    /* Score order says the still (5) beats the stream (2); Ambient reverses
+       them, because on a television the moving picture is the show. */
+    expect(scenicPool(cameras).map(c => c.id)).toEqual(['still', 'stream']);
+    expect(ambientPool(cameras).map(c => c.id)).toEqual(['stream', 'still']);
+  });
+
+  it('keeps scenic-score order inside the motion group and the fill group', () => {
+    const cameras = [
+      cam({ id: 'jpg-high', source: 'Public Webcam', name: 'Beach Falls Lake', feed_url: 'https://a/j.jpg' }),
+      cam({ id: 'hls-low', source: 'Public Webcam', name: 'Pier', stream_type: 'hls', stream_url: 'https://a/1.m3u8' }),
+      cam({ id: 'mp4-high', source: 'Public Webcam', name: 'Beach Falls', stream_type: 'mp4', stream_url: 'https://a/v.mp4' }),
+      cam({ id: 'jpg-low', source: 'WSDOT', name: 'Beach', feed_url: 'https://a/j2.jpg' }),
+    ];
+    expect(scenicPool(cameras).map(c => c.id)).toEqual(['jpg-high', 'mp4-high', 'hls-low', 'jpg-low']);
+    expect(ambientPool(cameras).map(c => c.id)).toEqual(['mp4-high', 'hls-low', 'jpg-high', 'jpg-low']);
+  });
+
+  it('treats iframe embeds as fill, not motion', () => {
+    const cameras = [
+      cam({ id: 'embed', source: 'Public Webcam', name: 'Beach', stream_type: 'iframe', stream_url: 'https://a/e' }),
+      cam({ id: 'clip', source: 'WSDOT', name: 'River', stream_type: 'mp4', stream_url: 'https://a/c.mp4' }),
+    ];
+    expect(ambientPool(cameras).map(c => c.id)).toEqual(['clip', 'embed']);
+  });
+
+  it('pulls a motion camera in from below the scenic cut before filling with stills', () => {
+    const stills = Array.from({ length: 50 }, (_, i) =>
+      cam({ id: `still-${i}`, source: 'Public Webcam', name: 'Beach', feed_url: `https://a/${i}.jpg` }));
+    const stream = cam({ id: 'stream-a', source: 'WSDOT', name: 'Harbour', stream_type: 'hls', stream_url: 'https://a/a.m3u8' });
+    const cameras = [...stills, stream];
+    /* On score alone the stream ranks 51st and misses the 48-cut entirely. */
+    expect(scenicPool(cameras, 48).map(c => c.id)).not.toContain('stream-a');
+    const pool = ambientPool(cameras, 48);
+    expect(pool).toHaveLength(48);
+    expect(pool[0].id).toBe('stream-a');
+    expect(pool.filter(c => String(c.id).startsWith('still-'))).toHaveLength(47);
+  });
+
+  it('falls back to playable cameras, still motion-first, when nothing scores', () => {
+    const cameras = [
+      cam({ id: 'road-still', source: 'WSDOT', name: 'I-5 Interchange', feed_url: 'https://a/r.jpg' }),
+      cam({ id: 'road-stream', source: 'WSDOT', name: 'I-90 Interchange', stream_type: 'mjpeg', stream_url: 'https://a/r.mjpeg' }),
+      cam({ id: 'dead', source: 'WSDOT', name: 'I-5' }),
+    ];
+    expect(ambientPool(cameras).map(c => c.id)).toEqual(['road-stream', 'road-still']);
   });
 });
 

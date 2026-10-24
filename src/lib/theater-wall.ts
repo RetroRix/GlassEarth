@@ -120,19 +120,59 @@ export function scenicScore(cam: WallCamera): number {
 }
 
 /**
- * Ambient TV's pool: the most scenic playable cameras, best first.
- *
- * Falls back to every playable camera when nothing scores at all — a quiet
- * highway interchange is still a better screensaver than an error message.
+ * The scenic ranking both pools draw from: playable cameras with a scenery
+ * score, best first — or, when nothing scores at all, every playable camera
+ * in catalogue order. A quiet highway interchange is still a better
+ * screensaver than an error message.
  */
-export function scenicPool(cameras: WallCamera[], limit = 48): WallCamera[] {
+function scenicRanked(cameras: WallCamera[]): WallCamera[] {
   const playable = cameras.filter(isWallPlayable);
   const scored = playable
     .map(c => ({ c, s: scenicScore(c) }))
     .filter(x => x.s > 0)
     .sort((a, b) => b.s - a.s)
     .map(x => x.c);
-  return (scored.length ? scored : playable).slice(0, limit);
+  return scored.length ? scored : playable;
+}
+
+/**
+ * The scenic pool in pure score order — the wall's ordering, unchanged.
+ *
+ * Falls back to every playable camera when nothing scores at all.
+ */
+export function scenicPool(cameras: WallCamera[], limit = 48): WallCamera[] {
+  return scenicRanked(cameras).slice(0, limit);
+}
+
+/**
+ * Media kinds that move on their own: a stream, not a still that has to be
+ * re-fetched to look alive. Iframe embeds are deliberately NOT here — an
+ * embed paints its own player chrome (branding, spinners, end screens),
+ * which is exactly what a screensaver is trying to get away from.
+ */
+const AMBIENT_MOTION_KINDS: ReadonlySet<WallMediaKind> = new Set(['hls', 'mp4', 'mjpeg']);
+
+/** Whether Ambient TV can show this camera as continuous motion. */
+export function isAmbientMotionCamera(cam: WallCamera): boolean {
+  const kind = wallMedia(cam)?.kind;
+  return kind !== undefined && AMBIENT_MOTION_KINDS.has(kind);
+}
+
+/**
+ * Ambient TV's pool: the scenic ranking, re-ordered so continuous-motion
+ * cameras lead and snapshots only fill the slots the streams cannot.
+ *
+ * Within each group the scenic-score order is untouched — the most scenic
+ * beach stream still opens the show, and the most scenic still is the first
+ * fallback. The partition runs over the full ranking before the limit is
+ * applied, so a stream ranked below the cut on scenery alone is pulled in
+ * ahead of a higher-scored still rather than left out entirely.
+ */
+export function ambientPool(cameras: WallCamera[], limit = 48): WallCamera[] {
+  const ranked = scenicRanked(cameras);
+  const motion = ranked.filter(isAmbientMotionCamera);
+  const rest = ranked.filter(c => !isAmbientMotionCamera(c));
+  return [...motion, ...rest].slice(0, limit);
 }
 
 /**
