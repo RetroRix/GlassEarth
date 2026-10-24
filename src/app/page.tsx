@@ -3,13 +3,14 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home, ArrowLeft } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, type WallCamera } from '@/lib/theater-wall';
 import { decodeShareView, type SharedView } from '@/lib/share-view';
 import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpeningTarget, writeLastView, type GeoLocation, type LastView } from '@/lib/opening-view';
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
+import { createViewHistory } from '@/lib/view-history';
 import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
@@ -808,6 +809,32 @@ export default function Dashboard() {
       if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
     };
   }, [mapView, splashGone]);
+
+  /* View history (the Back button): record settled views so Back can walk
+     back through them — roulette jumps, camera opens, search flights, preset
+     jumps, and the opening view itself, which is the stack's base. mapView
+     only changes on moveend, so mid-flight states never reach the stack; the
+     zoom guard keeps the initial globe view out, and the splash guard keeps
+     the opening flight's own start out. In-memory only — last-view
+     persistence already covers return visits. */
+  const [viewHistory] = useState(() => createViewHistory());
+  const [canGoBack, setCanGoBack] = useState(false);
+  useEffect(() => {
+    if (!splashGone) return;
+    const { latitude, longitude, zoom, bearing, pitch } = mapView;
+    if (zoom <= 3 || !isValidLatLon(latitude, longitude)) return;
+    setCanGoBack(viewHistory.record({ lat: latitude, lng: longitude, zoom, bearing, pitch }));
+  }, [mapView, splashGone, viewHistory]);
+
+  /* Back: fly to the previous view with the same mechanism as every other
+     flight. The popped entry becomes current at once, so the settled view
+     at the end of this flight dedupes against it and is never re-recorded. */
+  const goBackView = useCallback(() => {
+    const target = viewHistory.goBack();
+    if (!target) return;
+    setCanGoBack(viewHistory.canGoBack());
+    setFlyToLocation({ lat: target.lat, lng: target.lng, zoom: target.zoom, bearing: target.bearing, pitch: target.pitch, duration: 2500, ts: Date.now() });
+  }, [viewHistory]);
 
   /* Shared view: once the splash has gone, fly to what the link names —
      centre, zoom and camera angle — instead of home base. Runs once; the
@@ -2035,6 +2062,13 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
+          <button onClick={goBackView} disabled={!canGoBack} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${canGoBack ? 'hover:bg-white/10' : 'opacity-35 cursor-not-allowed'}`} title={canGoBack ? 'Back — return to the previous view' : 'Back — no previous view yet'} aria-label="Back to previous view" aria-disabled={!canGoBack}>
+            <ArrowLeft className="w-4 h-4 text-white/60" />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">BACK — PREVIOUS VIEW</span>
+        </div>
+
+        <div className="relative group">
           <button onClick={() => setFlyToLocation({ lat: HOME_BASE.lat, lng: HOME_BASE.lng, zoom: HOME_BASE.zoom, duration: 3500, ts: Date.now() })} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title="Home — fly back to El Paso, Glass Earth's home base" aria-label="Fly home to El Paso">
             <Home className="w-4 h-4 text-white/60" />
           </button>
@@ -2545,6 +2579,18 @@ export default function Dashboard() {
             )}
           </AnimatePresence>
         </>
+      )}
+
+      {/* ── BACK FAB (mobile/touch) ── */}
+      {/* The mirror of the roulette FAB, on the left: Back has to be one tap
+          on a tablet too, with no drawer to open. Dimmed while there is
+          nowhere to go back to, like the desktop strip button. */}
+      {isMobile && !mobilePanel && !showDirections && !navSession && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: revealed ? 1 : 0 }} transition={hudIn(0.3)} className="fixed z-[300] pointer-events-auto" style={{ bottom: 'calc(68px + env(safe-area-inset-bottom, 0px))', left: '12px' }}>
+          <button onClick={goBackView} disabled={!canGoBack} aria-label="Back to previous view" title={canGoBack ? 'Back — return to the previous view' : 'Back — no previous view yet'} className={`flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-primary)] bg-[var(--bg-panel)] shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-2xl ${canGoBack ? '' : 'opacity-35'}`}>
+            <ArrowLeft className="h-5 w-5 text-[var(--gold-primary)]" />
+          </button>
+        </motion.div>
       )}
 
       {/* ── BOTTOM CURSOR INFO (desktop) ── */}
