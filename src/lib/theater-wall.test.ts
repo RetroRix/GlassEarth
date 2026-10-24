@@ -4,6 +4,8 @@ import {
   FAVORITES_KEY,
   isWallPlayable,
   pickRouletteCamera,
+  rouletteControlState,
+  shouldShowRouletteFab,
   rouletteCandidates,
   loadAssignments,
   loadFavorites,
@@ -216,5 +218,28 @@ describe('roulette', () => {
     const stills = [still('p1'), still('p2')];
     expect(pickRouletteCamera(stills, null, () => 0.9)?.id).toBe('p2');
     expect(pickRouletteCamera([stream('only')], 'only', () => 0)?.id).toBe('only');
+  });
+
+  it('the control is ready once the catalogue has landed, loading before that', () => {
+    expect(rouletteControlState(0).ready).toBe(false);
+    expect(rouletteControlState(1).ready).toBe(true);
+    expect(rouletteControlState(66000).ready).toBe(true);
+    /* The loading title says what is happening — the button is never a bare
+       spinner with no explanation. */
+    expect(rouletteControlState(0).title).toMatch(/catalogue is still loading/);
+    expect(rouletteControlState(5).title).toMatch(/random live camera/);
+  });
+});
+
+describe('shouldShowRouletteFab', () => {
+  const base = { isMobile: true, mobilePanel: null as string | null, showDirections: false, navSession: null as unknown };
+  it('shows on touch layout with nothing open', () => {
+    expect(shouldShowRouletteFab(base)).toBe(true);
+  });
+  it('hides on desktop, with a drawer open, with the planner open, or mid-guidance', () => {
+    expect(shouldShowRouletteFab({ ...base, isMobile: false })).toBe(false);
+    expect(shouldShowRouletteFab({ ...base, mobilePanel: 'tv' })).toBe(false);
+    expect(shouldShowRouletteFab({ ...base, showDirections: true })).toBe(false);
+    expect(shouldShowRouletteFab({ ...base, navSession: { route: 'x' } })).toBe(false);
   });
 });

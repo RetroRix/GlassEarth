@@ -8,6 +8,35 @@
  * dressing a guess up as a number.
  */
 
+import type { FlightFeedStatus } from './flight-load';
+
+/** How one counter renders: a number, a loading shimmer, an error dash, or
+    not at all. The aircraft metric is the only one with a feed state of its
+    own — while flights are loading, AIR shows a spinner instead of vanishing
+    (a missing AIR reads as "aviation is broken"), and after a failed fetch
+    it shows a dash with a "retrying" title instead of a dressed-up zero. */
+export type CounterMetricState = 'hidden' | 'number' | 'loading' | 'error';
+
+export function counterMetricStates(
+  counts: LiveCounts,
+  flightsStatus: FlightFeedStatus,
+): Record<keyof LiveCounts, CounterMetricState> {
+  const numberOrHidden = (n: number | null): CounterMetricState => (n !== null ? 'number' : 'hidden');
+  return {
+    aircraft:
+      counts.aircraft !== null
+        ? 'number'
+        : flightsStatus === 'loading'
+          ? 'loading'
+          : flightsStatus === 'error'
+            ? 'error'
+            : 'hidden',
+    satellites: numberOrHidden(counts.satellites),
+    cameras: numberOrHidden(counts.cameras),
+    quakes24h: numberOrHidden(counts.quakes24h),
+  };
+}
+
 export interface LiveCountsData {
   commercial_flights?: unknown;
   private_flights?: unknown;

@@ -1,5 +1,5 @@
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
 
 export const maxDuration = 60;
@@ -242,7 +242,31 @@ function classifyFlight(f: any) {
   };
 }
 
-let cachedData: any = null;
+/** A classified flight row — the return shape of classifyFlight. */
+type FlightRow = NonNullable<ReturnType<typeof classifyFlight>>;
+
+/** The /api/flights response payload. */
+interface FlightPayload {
+  commercial_flights: FlightRow[];
+  private_flights: FlightRow[];
+  private_jets: FlightRow[];
+  military_flights: FlightRow[];
+  gps_jamming: { lat: number; lng: number; severity: number; count: number }[];
+  total: number;
+  source: string;
+  partial?: boolean;
+  providers: {
+    adsbfi_mil: number;
+    adsblol: number;
+    adsbfi_regional: number;
+    opensky: number;
+    opensky_auth: boolean;
+    opensky_age_s: number | null;
+  };
+  timestamp: string;
+}
+
+let cachedData: FlightPayload | null = null;
 let lastFetchTime = 0;
 // 90s TTL keeps us well within the authenticated OpenSky budget (4000 credits/day,
 // 4 credits/call = 1000 calls/day ≈ one per 86s). The old 45s TTL at ~1920 calls/day
@@ -268,7 +292,7 @@ const openSkyInterval = () => (hasOpenSkyCreds() ? 90000 : 900000);
 // on screen stable; only their age varies, which providers.opensky_age_s reports.
 let osSnapshot: any[] = [];
 let osSnapshotTime = 0;
-let fetchPromise: Promise<any> | null = null;
+let fetchPromise: Promise<FlightPayload> | null = null;
 
 // Back off from OpenSky after a 429 so the daily quota can reset.
 // Re-poking a limited endpoint on every cache miss keeps the IP throttled.
@@ -319,245 +343,379 @@ function ingestAc(raw: any[], into: any[], seen: Set<string>) {
   }
 }
 
+// ── First wave ──────────────────────────────────────────────────────────────
+// The densest corridors. A cold instance answers from these alone (a few
+// seconds); the full sweep completes behind the response and lands in the
+// cache, so the next request — or the client's 30s refetch — sees the whole
+// sky. First-wave payloads carry `partial: true` and are never cached.
+const FIRST_WAVE = [
+  { lat: 39.8, lon: -98.5 }, // Central US
+  { lat: 41.0, lon: -74.0 }, // Northeast (NYC/Boston/DC)
+  { lat: 33.0, lon: -84.0 }, // Southeast (Atlanta)
+  { lat: 42.0, lon: -88.0 }, // Midwest (Chicago)
+  { lat: 30.0, lon: -97.0 }, // Texas (Dallas/Houston)
+  { lat: 34.0, lon: -118.0 }, // SoCal (LA)
+  { lat: 50.0, lon: 15.0 }, // Central Europe
+  { lat: 51.5, lon: -1.0 }, // UK / Ireland
+  { lat: 47.0, lon: 2.0 }, // France / Alps
+  { lat: 40.0, lon: -4.0 }, // Iberia
+  { lat: 42.0, lon: 13.0 }, // Italy / Adriatic
+  { lat: 35.0, lon: 136.0 }, // Japan
+];
+
+let firstWavePromise: Promise<FlightPayload> | null = null;
+
+/* Fresh full payloads are edge-cacheable for a minute (positions are already
+   up to 90 s stale by design, and the client polls every 5 min); the edge
+   serves stale for a further two minutes while revalidating. Partial and
+   stale payloads are never edge-cached — they are one visitor's interim
+   answer, not the fresh truth. */
+const freshHeaders = (total: number) => ({
+  'Cache-Control': total < 100 ? 'no-store, max-age=0' : 'public, s-maxage=60, stale-while-revalidate=120',
+});
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
+
+/** Military feeds (both providers), drained into the accumulator. Returns
+    how many military aircraft they contributed. */
+async function fetchMilInto(allRaw: Array<Record<string, unknown>>, seenHex: Set<string>): Promise<number> {
+  const before = allRaw.length;
+  const [fiRes, lolRes] = await Promise.allSettled([
+    stealthFetch(`${ADSBFI_BASE}/mil`, { signal: AbortSignal.timeout(15000) }),
+    stealthFetch(`${ADSBLOL_BASE}/mil`, { signal: AbortSignal.timeout(15000) }),
+  ]);
+  for (const [label, r] of [['adsb.fi', fiRes], ['adsb.lol', lolRes]] as const) {
+    if (r.status === 'fulfilled') {
+      if (r.value.ok) {
+        try {
+          const data = await r.value.json();
+          ingestAc(acArray(data), allRaw, seenHex);
+        } catch (e) {
+          console.warn(`[OSIRIS] ${label} mil parse error:`, e);
+        }
+      } else {
+        console.warn(`[OSIRIS] ${label} mil feed returned`, r.value.status);
+        await r.value.body?.cancel();
+      }
+    }
+  }
+  return allRaw.length - before;
+}
+
+/** OpenSky snapshot refresh. Returns true when a usable snapshot exists
+    afterwards (freshly fetched or carried over). Only called with
+    credentials: anonymously the pool is throttled out within the first hour,
+    so without credentials it is not called at all. */
+async function refreshOpenSkySnapshot(): Promise<boolean> {
+  const token = await getOpenSkyToken();
+  const osInit: RequestInit = token
+    ? { signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${token}` } }
+    : { signal: AbortSignal.timeout(30000) };
+  let res: Response;
+  try {
+    res = await stealthFetch('https://opensky-network.org/api/states/all?extended=1', osInit);
+  } catch {
+    return osSnapshot.length > 0;
+  }
+  if (res.status === 429) {
+    openSkyCooldownUntil = Date.now() + OPENSKY_COOLDOWN;
+    console.warn('[OSIRIS] OpenSky 429 — cooling down 15 min');
+    await res.body?.cancel();
+    return osSnapshot.length > 0;
+  }
+  if (!res.ok) {
+    // A rejected token surfaces here as a 401 — previously discarded silently.
+    console.warn('[OSIRIS] OpenSky returned', res.status);
+    await res.body?.cancel();
+    return osSnapshot.length > 0;
+  }
+  try {
+    const data = await res.json();
+    const states = data.states || [];
+    if (states.length > 100) {
+      osSnapshot = states.map((s: any[]) => ({
+        hex: s[0],
+        flight: s[1]?.trim(),
+        lon: s[5],
+        lat: s[6],
+        alt_baro: typeof s[7] === 'number' ? s[7] * 3.28084 : null,
+        gs: typeof s[9] === 'number' ? s[9] * 1.94384 : null,
+        track: s[10],
+        squawk: s[14],
+        category_os: s[17],
+      }));
+      osSnapshotTime = Date.now();
+    }
+  } catch (e) {
+    console.warn('[OSIRIS] OpenSky parse error:', e);
+  }
+  return osSnapshot.length > 0;
+}
+
+/** adsb.lol regional sweep over the given regions. The pool stays at 5: a
+    wider fan-out measured worse (8-concurrent halved the aircraft returned,
+    i.e. the provider throttles). Returns the lol count and the regions that
+    answered empty, for the adsb.fi fallback. */
+async function sweepLolRegions(
+  regions: { lat: number; lon: number }[],
+  allRaw: Array<Record<string, unknown>>,
+  seenHex: Set<string>,
+): Promise<{ count: number; empty: { lat: number; lon: number }[] }> {
+  const before = allRaw.length;
+  const empty: { lat: number; lon: number }[] = [];
+  const POOL = 5;
+  for (let i = 0; i < regions.length; i += POOL) {
+    const batch = regions.slice(i, i + POOL);
+    const results = await Promise.all(batch.map(r => fetchAdsbLolRegion(r.lat, r.lon)));
+    results.forEach((ac, j) => {
+      if (ac.length) ingestAc(ac, allRaw, seenHex);
+      else empty.push(batch[j]);
+    });
+  }
+  return { count: allRaw.length - before, empty };
+}
+
+/** adsb.fi fallback for regions adsb.lol answered empty, under a time
+    budget. adsb.fi allows roughly one request per second and soft-throttles
+    over that by returning 200 with an empty array, so the fallback is paced
+    and never the parallel primary. Regions the budget skips are retried on
+    the next cache cycle. */
+async function sweepFiFallback(
+  emptyRegions: { lat: number; lon: number }[],
+  allRaw: Array<Record<string, unknown>>,
+  seenHex: Set<string>,
+): Promise<number> {
+  const before = allRaw.length;
+  const FALLBACK_BUDGET_MS = 20_000;
+  const fallbackStart = Date.now();
+  let fiCursor = 0;
+  const fiWorker = async () => {
+    while (fiCursor < emptyRegions.length) {
+      if (Date.now() - fallbackStart > FALLBACK_BUDGET_MS) return;
+      const r = emptyRegions[fiCursor++];
+      ingestAc(await fetchAdsbFiRegion(r.lat, r.lon), allRaw, seenHex);
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+  };
+  await Promise.all([fiWorker(), fiWorker(), fiWorker()]);
+  return allRaw.length - before;
+}
+
+/** Classify the accumulated raw aircraft and build the response payload. */
+function buildPayload(
+  allRaw: Array<Record<string, unknown>>,
+  opts: { source: string; milCount: number; lolCount: number; fiRegionalCount: number; partial?: boolean },
+): FlightPayload {
+  const JAMMING_NACAP_THRESHOLD = 4;
+  const commercial: FlightRow[] = [];
+  const privateFl: FlightRow[] = [];
+  const jets: FlightRow[] = [];
+  const military: FlightRow[] = [];
+  const gpsJamming: { lat: number; lng: number; nac_p: number; callsign: string }[] = [];
+
+  for (const raw of allRaw) {
+    const flight = classifyFlight(raw);
+    if (!flight) continue;
+
+    if (typeof flight.nac_p === 'number' && flight.nac_p <= JAMMING_NACAP_THRESHOLD && !flight.grounded) {
+      gpsJamming.push({ lat: flight.lat, lng: flight.lng, nac_p: flight.nac_p, callsign: flight.callsign });
+    }
+
+    switch (flight.category) {
+      case 'military': military.push(flight); break;
+      case 'jet':      jets.push(flight);     break;
+      case 'private':  privateFl.push(flight); break;
+      default:         commercial.push(flight);
+    }
+  }
+
+  return {
+    commercial_flights: commercial,
+    private_flights:    privateFl,
+    private_jets:       jets,
+    military_flights:   military,
+    gps_jamming:        aggregateJamming(gpsJamming, JAMMING_NACAP_THRESHOLD),
+    total:              allRaw.length,
+    source:             opts.source,
+    ...(opts.partial ? { partial: true } : {}),
+    // Per-feed counts so a provider that starts answering 200 with no aircraft
+    // is visible in the payload rather than silently emptying the map.
+    providers: {
+      adsbfi_mil:      opts.milCount,
+      adsblol:         opts.lolCount,
+      adsbfi_regional: opts.fiRegionalCount,
+      opensky:         osSnapshot.length,
+      opensky_auth:    hasOpenSkyCreds(),
+      opensky_age_s:   osSnapshotTime ? Math.round((Date.now() - osSnapshotTime) / 1000) : null,
+    },
+    timestamp:          new Date().toISOString(),
+  };
+}
+
+/** The full community sweep: military feeds and the 30-region adsb.lol sweep
+    run concurrently (measured 3x faster than the old sequential march: 5.6 s
+    vs 18.9 s from the test host), then the adsb.fi fallback for empty
+    regions. */
+async function runCommunitySweep(): Promise<FlightPayload> {
+  const allRaw: Array<Record<string, unknown>> = [];
+  const seenHex = new Set<string>();
+  const [milCount, lol] = await Promise.all([
+    fetchMilInto(allRaw, seenHex),
+    sweepLolRegions(REGIONS, allRaw, seenHex),
+  ]);
+  const fiRegionalCount = await sweepFiFallback(lol.empty, allRaw, seenHex);
+  if (allRaw.length === 0) {
+    console.error(
+      '[OSIRIS] every flight provider returned zero aircraft — ' +
+      'set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET (free at opensky-network.org) ' +
+      'for an authenticated primary source'
+    );
+  }
+  return buildPayload(allRaw, { source: 'community', milCount, lolCount: lol.count, fiRegionalCount });
+}
+
+/** The authenticated-OpenSky sweep: military + OpenSky first, civil regions
+    only when the snapshot is empty. Unchanged from the original flow — the
+    creds path was already fast (one /states/all call). */
+async function runOpenSkySweep(): Promise<FlightPayload> {
+  const allRaw: Array<Record<string, unknown>> = [];
+  const seenHex = new Set<string>();
+  const [milCount, openSkyWorked] = await Promise.all([
+    fetchMilInto(allRaw, seenHex),
+    refreshOpenSkySnapshot(),
+  ]);
+  ingestAc(osSnapshot, allRaw, seenHex);
+  let lolCount = 0;
+  let fiRegionalCount = 0;
+  let source = 'opensky-auth';
+  if (!openSkyWorked) {
+    source = 'community';
+    const lol = await sweepLolRegions(REGIONS, allRaw, seenHex);
+    lolCount = lol.count;
+    fiRegionalCount = await sweepFiFallback(lol.empty, allRaw, seenHex);
+    if (allRaw.length === 0) {
+      console.error(
+        '[OSIRIS] every flight provider returned zero aircraft — ' +
+        'set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET (free at opensky-network.org) ' +
+        'for an authenticated primary source'
+      );
+    }
+  }
+  return buildPayload(allRaw, { source, milCount, lolCount, fiRegionalCount });
+}
+
+/** Fast first wave for a cold instance: military feeds + the 12 densest
+    regions, concurrently. No adsb.fi fallback — speed matters more than the
+    last few quiet regions here; the full sweep behind the response covers
+    them. The payload is marked partial and never cached. */
+async function runFirstWave(): Promise<FlightPayload> {
+  const allRaw: Array<Record<string, unknown>> = [];
+  const seenHex = new Set<string>();
+  const [milCount, lol] = await Promise.all([
+    fetchMilInto(allRaw, seenHex),
+    sweepLolRegions(FIRST_WAVE, allRaw, seenHex),
+  ]);
+  return buildPayload(allRaw, { source: 'community', milCount, lolCount: lol.count, fiRegionalCount: 0, partial: true });
+}
+
+async function getFirstWave(): Promise<FlightPayload> {
+  if (firstWavePromise) return firstWavePromise;
+  firstWavePromise = runFirstWave();
+  try {
+    return await firstWavePromise;
+  } finally {
+    firstWavePromise = null;
+  }
+}
+
+/** True when an authenticated OpenSky refresh is due (credentials configured,
+    not in 429 cooldown, snapshot older than its interval). */
+function openSkyDue(): boolean {
+  return hasOpenSkyCreds() && Date.now() >= openSkyCooldownUntil && Date.now() - osSnapshotTime >= openSkyInterval();
+}
+
+/** The full sweep, deduplicated across concurrent requests, cached on
+    success. With credentials and a carried-over snapshot the civil sweep is
+    skipped, exactly as before — the snapshot is the source of record. */
+async function getFreshFlights(): Promise<FlightPayload> {
+  if (fetchPromise) return fetchPromise;
+  fetchPromise = (async () => {
+    if (openSkyDue()) return runOpenSkySweep();
+    if (hasOpenSkyCreds() && osSnapshot.length > 0) {
+      const allRaw: Array<Record<string, unknown>> = [];
+      const seenHex = new Set<string>();
+      const milCount = await fetchMilInto(allRaw, seenHex);
+      ingestAc(osSnapshot, allRaw, seenHex);
+      return buildPayload(allRaw, { source: 'opensky-auth', milCount, lolCount: 0, fiRegionalCount: 0 });
+    }
+    return runCommunitySweep();
+  })();
+  try {
+    const data = await fetchPromise;
+    cachedData = data;
+    lastFetchTime = Date.now();
+    return data;
+  } finally {
+    fetchPromise = null;
+  }
+}
+
 export async function GET() {
   const now = Date.now();
 
+  // Fresh cache: answer immediately.
   if (cachedData && now - lastFetchTime < CACHE_TTL) {
-    return NextResponse.json(cachedData, {
-      headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
-    });
+    return NextResponse.json(cachedData, { headers: freshHeaders(cachedData.total ?? 0) });
   }
 
+  // Stale cache: answer from it now and refresh behind the response — a
+  // visitor never waits out a sweep for data that is at most 90 seconds old.
+  if (cachedData) {
+    after(() => {
+      void getFreshFlights().catch(e => console.error('[OSIRIS] Background flight refresh failed:', e));
+    });
+    return NextResponse.json({ ...cachedData, stale: true }, { headers: NO_STORE_HEADERS });
+  }
+
+  // A sweep is already running: join it instead of starting a second one.
   if (fetchPromise) {
     try {
       const data = await fetchPromise;
-      return NextResponse.json(data, {
-        headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
-      });
+      return NextResponse.json(data, { headers: freshHeaders(data.total ?? 0) });
     } catch {
       return NextResponse.json({ error: 'Failed to fetch flight data' }, { status: 500 });
     }
   }
 
-  const JAMMING_NACAP_THRESHOLD = 4;
-
-  fetchPromise = (async () => {
-    const allRaw: any[] = [];
-    const seenHex = new Set<string>();
-    let source: string;
-
-    // ── Phase 1 + 2 in parallel: global military feeds AND OpenSky ──────────
-    // The military feeds run every cycle regardless of OpenSky status and
-    // are always current, so military traffic stays live even while an
-    // OpenSky snapshot is waiting out its interval.
-    // OpenSky is only called with credentials: anonymously, datacenter IPs
-    // are throttled out of its 400 credits/day pool within the first hour,
-    // after which every call 429s or hangs — it contributed zero aircraft
-    // and up to 30s of latency. The community sweep below is the civil
-    // source of record until OPENSKY_CLIENT_ID/SECRET are configured.
-    const skipOpenSky =
-      !hasOpenSkyCreds() ||
-      Date.now() < openSkyCooldownUntil ||
-      Date.now() - osSnapshotTime < openSkyInterval();
-    const token = skipOpenSky ? null : await getOpenSkyToken();
-    const osInit: RequestInit = token
-      ? { signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${token}` } }
-      : { signal: AbortSignal.timeout(30000) };
-
-    const [milRes, milLolRes, osRes] = await Promise.allSettled([
-      stealthFetch(`${ADSBFI_BASE}/mil`, { signal: AbortSignal.timeout(15000) }),
-      stealthFetch(`${ADSBLOL_BASE}/mil`, { signal: AbortSignal.timeout(15000) }),
-      skipOpenSky
-        ? Promise.reject(new Error('OpenSky not configured / in cooldown'))
-        // extended=1 appends the ADS-B emitter category as an 18th field. Without
-        // it the state vector is 17 long and s[17] below is silently undefined,
-        // which is what made every category_os test in classifyFlight() dead.
-        // It does not change the credit cost — that is set by the area queried.
-        : stealthFetch('https://opensky-network.org/api/states/all?extended=1', osInit),
-    ]);
-
-    // Drain the military feeds — parse on ok, discard the body otherwise to free the connection.
-    for (const [label, r] of [['adsb.fi', milRes], ['adsb.lol', milLolRes]] as const) {
-      if (r.status === 'fulfilled') {
-        if (r.value.ok) {
-          try {
-            const data = await r.value.json();
-            ingestAc(acArray(data), allRaw, seenHex);
-          } catch (e) {
-            console.warn(`[OSIRIS] ${label} mil parse error:`, e);
-          }
-        } else {
-          console.warn(`[OSIRIS] ${label} mil feed returned`, r.value.status);
-          await r.value.body?.cancel();
-        }
-      }
+  // Cold instance, authenticated OpenSky: the creds path is already fast
+  // (one /states/all call + military), so run it synchronously.
+  if (openSkyDue()) {
+    try {
+      const data = await getFreshFlights();
+      return NextResponse.json(data, { headers: freshHeaders(data.total ?? 0) });
+    } catch (error) {
+      console.error('[OSIRIS] Flight fetch error:', error);
+      return NextResponse.json({ error: 'Failed to fetch flight data' }, { status: 500 });
     }
-    const milCount = allRaw.length;
+  }
 
-    // Refresh the OpenSky snapshot when one was due; otherwise the existing one
-    // carries over untouched.
-    if (osRes.status === 'fulfilled') {
-      if (osRes.value.status === 429) {
-        openSkyCooldownUntil = Date.now() + OPENSKY_COOLDOWN;
-        console.warn('[OSIRIS] OpenSky 429 — cooling down 15 min');
-        await osRes.value.body?.cancel();
-      } else if (osRes.value.ok) {
-        try {
-          const data = await osRes.value.json();
-          const states = data.states || [];
-          if (states.length > 100) {
-            osSnapshot = states.map((s: any[]) => ({
-              hex: s[0],
-              flight: s[1]?.trim(),
-              lon: s[5],
-              lat: s[6],
-              alt_baro: typeof s[7] === 'number' ? s[7] * 3.28084 : null,
-              gs: typeof s[9] === 'number' ? s[9] * 1.94384 : null,
-              track: s[10],
-              squawk: s[14],
-              category_os: s[17],
-            }));
-            osSnapshotTime = Date.now();
-          }
-        } catch (e) {
-          console.warn('[OSIRIS] OpenSky parse error:', e);
-        }
-      } else {
-        // A rejected token surfaces here as a 401 — previously discarded silently.
-        console.warn('[OSIRIS] OpenSky returned', osRes.value.status);
-        await osRes.value.body?.cancel();
-      }
-    }
-
-    ingestAc(osSnapshot, allRaw, seenHex);
-    const openSkyWorked = osSnapshot.length > 0;
-
-    // ── Phase 3: community regional sweep — the civil source ────────────────
-    // Runs whenever there is no OpenSky snapshot (i.e. always, until
-    // credentials are configured). adsb.lol tolerates a modest parallel
-    // fan-out (verified: 4-concurrent regional calls all answer 200 with
-    // real traffic), so the 30 regions sweep through a small pool instead
-    // of the old serial march that alone could eat the whole invocation.
-    // A region adsb.lol answers empty gets one paced adsb.fi attempt —
-    // the two networks' feeder coverage differs, and an empty region is
-    // either quiet airspace or a dead provider; the fallback distinguishes
-    // them often enough to be worth its ~1s.
-    let lolCount = 0;
-    let fiRegionalCount = 0;
-    if (!openSkyWorked) {
-      source = 'community';
-      const before = allRaw.length;
-      const emptyRegions: { lat: number; lon: number }[] = [];
-      const POOL = 5;
-      for (let i = 0; i < REGIONS.length; i += POOL) {
-        const batch = REGIONS.slice(i, i + POOL);
-        const results = await Promise.all(batch.map(r => fetchAdsbLolRegion(r.lat, r.lon)));
-        results.forEach((ac, j) => {
-          if (ac.length) ingestAc(ac, allRaw, seenHex);
-          else emptyRegions.push(batch[j]);
-        });
-      }
-      lolCount = allRaw.length - before;
-
-      /* adsb.fi fallback for the regions adsb.lol answered empty — run
-         through a small pool under an overall time budget. The first
-         version marched serially with a 1.1s gap per region, and from
-         Vercel's egress (where more regions come back empty) that tail
-         could push the whole sweep past the 60s function limit and the
-         route died mid-answer. Regions the budget skips are simply
-         retried on the next cache cycle. */
-      const FALLBACK_BUDGET_MS = 20_000;
-      const fallbackStart = Date.now();
-      let fiCursor = 0;
-      const fiWorker = async () => {
-        while (fiCursor < emptyRegions.length) {
-          if (Date.now() - fallbackStart > FALLBACK_BUDGET_MS) return;
-          const r = emptyRegions[fiCursor++];
-          const beforeFi = allRaw.length;
-          ingestAc(await fetchAdsbFiRegion(r.lat, r.lon), allRaw, seenHex);
-          fiRegionalCount += allRaw.length - beforeFi;
-          await new Promise(resolve => setTimeout(resolve, 400));
-        }
-      };
-      await Promise.all([fiWorker(), fiWorker(), fiWorker()]);
-
-      if (allRaw.length === 0) {
-        console.error(
-          '[OSIRIS] every flight provider returned zero aircraft — ' +
-          'set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET (free at opensky-network.org) ' +
-          'for an authenticated primary source'
-        );
-      }
-    } else {
-      source = 'opensky-auth';
-    }
-
-    // ── Classify ──────────────────────────────────────────────────────────────
-    const commercial: any[] = [];
-    const privateFl: any[] = [];
-    const jets: any[] = [];
-    const military: any[] = [];
-    const gpsJamming: any[] = [];
-
-    for (const raw of allRaw) {
-      const flight = classifyFlight(raw);
-      if (!flight) continue;
-
-      if (typeof flight.nac_p === 'number' && flight.nac_p <= JAMMING_NACAP_THRESHOLD && !flight.grounded) {
-        gpsJamming.push({ lat: flight.lat, lng: flight.lng, nac_p: flight.nac_p, callsign: flight.callsign });
-      }
-
-      switch (flight.category) {
-        case 'military': military.push(flight); break;
-        case 'jet':      jets.push(flight);     break;
-        case 'private':  privateFl.push(flight); break;
-        default:         commercial.push(flight);
-      }
-    }
-
-    return {
-      commercial_flights: commercial,
-      private_flights:    privateFl,
-      private_jets:       jets,
-      military_flights:   military,
-      gps_jamming:        aggregateJamming(gpsJamming, JAMMING_NACAP_THRESHOLD),
-      total:              allRaw.length,
-      source,
-      // Per-feed counts so a provider that starts answering 200 with no aircraft
-      // is visible in the payload rather than silently emptying the map.
-      providers: {
-        adsbfi_mil:      milCount,
-        adsblol:         lolCount,
-        adsbfi_regional: fiRegionalCount,
-        opensky:         osSnapshot.length,
-        opensky_auth:    hasOpenSkyCreds(),
-        opensky_age_s:   osSnapshotTime ? Math.round((Date.now() - osSnapshotTime) / 1000) : null,
-      },
-      timestamp:          new Date().toISOString(),
-    };
-  })();
-
+  // Cold instance, community path: answer from the fast first wave now and
+  // run the full sweep behind the response. If the wave itself fails, fall
+  // back to the full sweep rather than answering empty.
   try {
-    const data = await fetchPromise;
-    cachedData = data;
-    lastFetchTime = Date.now();
-    fetchPromise = null;
-    return NextResponse.json(data, {
-      headers: {
-        'Cache-Control': data.total < 100 ? 'no-store, max-age=0' : 'public, s-maxage=30, stale-while-revalidate=60',
-      },
+    const wave = await getFirstWave();
+    after(() => {
+      void getFreshFlights().catch(e => console.error('[OSIRIS] Background flight refresh failed:', e));
     });
+    return NextResponse.json(wave, { headers: NO_STORE_HEADERS });
   } catch (error) {
-    console.error('[OSIRIS] Flight fetch error:', error);
-    fetchPromise = null;
-    // Stale-cache fallback: return last known good data instead of blank map
-    if (cachedData) {
-      console.warn('[OSIRIS] Returning stale flight cache as fallback');
-      return NextResponse.json({ ...cachedData, source: (cachedData.source || 'unknown') + '+stale' }, {
-        headers: { 'Cache-Control': 'no-store, max-age=0' },
-      });
+    console.error('[OSIRIS] First-wave flight fetch error:', error);
+    try {
+      const data = await getFreshFlights();
+      return NextResponse.json(data, { headers: freshHeaders(data.total ?? 0) });
+    } catch (e2) {
+      console.error('[OSIRIS] Flight fetch error:', e2);
+      return NextResponse.json({ error: 'Failed to fetch flight data' }, { status: 500 });
     }
-    return NextResponse.json({ error: 'Failed to fetch flight data' }, { status: 500 });
   }
 }
 

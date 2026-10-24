@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home, ArrowLeft } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
-import { pickRouletteCamera, type WallCamera } from '@/lib/theater-wall';
+import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
+import { FLIGHT_STALE_REFETCH_ATTEMPTS, FLIGHT_STALE_REFETCH_MS, hasFlightData, isPartialFlightPayload, isStaleFlightPayload, nextFlightRetryDelay, normalizeFlightPayload, type FlightFeedStatus } from '@/lib/flight-load';
 import { decodeShareView, type SharedView } from '@/lib/share-view';
 import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpeningTarget, writeLastView, type GeoLocation, type LastView } from '@/lib/opening-view';
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
@@ -373,7 +374,27 @@ export default function Dashboard() {
   const [arcgisLayers, setArcgisLayers] = useState<Array<{ id: string; title: string; url: string; geojson: any; color: string; visible: boolean; opacity: number }>>([]);
   /* What Live Transit can see right now, for its row in the layer panel. */
   const [transitStatus, setTransitStatus] = useState<TransitStatus | null>(null);
-  const layerLiveStatus = useMemo(() => (transitStatus ? { transit: transitStatus.text } : undefined), [transitStatus]);
+  /* What the flight feed is doing right now, for the counter strip and the
+     aviation rows in the layer panel. The feed backs all four aviation rows,
+     so while it is loading or retrying, say so under each of them instead of
+     leaving the counts blank — a blank bar reads as "aviation is broken". */
+  const [flightsStatus, setFlightsStatus] = useState<FlightFeedStatus>('idle');
+  const layerLiveStatus = useMemo(() => {
+    const status: Record<string, string> = {};
+    if (transitStatus) status.transit = transitStatus.text;
+    if (flightsStatus === 'loading') {
+      status.flights = 'Loading flights…';
+      status.private = 'Loading flights…';
+      status.jets = 'Loading flights…';
+      status.military = 'Loading flights…';
+    } else if (flightsStatus === 'error') {
+      status.flights = 'Flights unavailable — retrying';
+      status.private = 'Flights unavailable — retrying';
+      status.jets = 'Flights unavailable — retrying';
+      status.military = 'Flights unavailable — retrying';
+    }
+    return Object.keys(status).length ? status : undefined;
+  }, [transitStatus, flightsStatus]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'remote'|'oi'|'tv'|null>(null);
@@ -1075,6 +1096,11 @@ export default function Dashboard() {
     setActiveCamera({ ...pick, type: 'cctv' });
   }, [activeCamera]);
 
+  /* The roulette control's state, shared by the desktop strip button and the
+     mobile floating button: always the dice icon, visibly dimmed with a small
+     loading badge while the camera catalogue is still loading. */
+  const roulette = rouletteControlState(cameraCount);
+
   /* A spin asked for while the catalogue was still loading completes itself
      when the first batch lands. */
   useEffect(() => {
@@ -1234,6 +1260,75 @@ export default function Dashboard() {
 
   // ── LAYER-AWARE DATA LOADING — only fetch when layer is toggled ON ──
   const layerFetchedRef = useRef<Set<string>>(new Set());
+  // ── FLIGHTS LOADING — fetched only on success, retried on failure ──
+  /* The old code marked 'flights' fetched synchronously before the request
+     finished, so one failed first attempt left the layer empty until the
+     5-minute poll — and the counter strip hid AIR entirely, which reads as
+     "aviation is broken". This loader marks the layer only when data lands,
+     retries a failed attempt on a short backoff, and keeps the flight status
+     honest for the strip and the Layers panel. A stale snapshot or a first
+     wave is shown at once, then re-fetched soon for the full picture. */
+  const flightsInFlightRef = useRef(false);
+  const flightsRetryPendingRef = useRef(false);
+  const flightsTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const flightsRefetchCountRef = useRef(0);
+  const loadFlights = useCallback(function loadFlightsInner(attempt = 0): void {
+    if (flightsInFlightRef.current || flightsRetryPendingRef.current) return;
+    /* Timers self-cancel when the aviation layers go off again. */
+    const av = assistLayers.current;
+    if (!av || !(av.flights || av.military || av.jets || av.private)) return;
+    const d = dataRef.current;
+    if (hasFlightData(d) && !isStaleFlightPayload(d) && !isPartialFlightPayload(d)) {
+      layerFetchedRef.current.add('flights');
+      flightsRefetchCountRef.current = 0;
+      setFlightsStatus('ready');
+      return;
+    }
+    flightsInFlightRef.current = true;
+    setFlightsStatus('loading');
+    fetchEndpoint('/api/flights', normalizeFlightPayload).then(ok => {
+      flightsInFlightRef.current = false;
+      /* The layers went off mid-flight: the data still merged, but the
+         status goes back to idle instead of reporting on a layer nobody
+         is watching. (Set here, in the promise callback — not in an effect.) */
+      const layersNow = assistLayers.current;
+      const stillWanted = Boolean(layersNow && (layersNow.flights || layersNow.military || layersNow.jets || layersNow.private));
+      if (!stillWanted) {
+        setFlightsStatus('idle');
+        return;
+      }
+      if (ok) {
+        layerFetchedRef.current.add('flights');
+        const landed = dataRef.current;
+        if (isStaleFlightPayload(landed) || isPartialFlightPayload(landed)) {
+          /* A snapshot or a first wave: show what we have, then come back
+             soon for the full picture. Bounded — the 5-minute poll is the
+             backstop after that. */
+          if (flightsRefetchCountRef.current < FLIGHT_STALE_REFETCH_ATTEMPTS) {
+            flightsRefetchCountRef.current += 1;
+            flightsTimersRef.current.push(setTimeout(() => loadFlightsInner(), FLIGHT_STALE_REFETCH_MS));
+            setFlightsStatus('loading');
+          } else {
+            flightsRefetchCountRef.current = 0;
+            setFlightsStatus('ready');
+          }
+        } else {
+          flightsRefetchCountRef.current = 0;
+          setFlightsStatus('ready');
+        }
+        return;
+      }
+      const delay = nextFlightRetryDelay(attempt);
+      setFlightsStatus('error');
+      if (delay != null) {
+        flightsRetryPendingRef.current = true;
+        flightsTimersRef.current.push(setTimeout(() => {
+          flightsRetryPendingRef.current = false;
+          loadFlightsInner(attempt + 1);
+        }, delay));
+      }
+    });
+  }, [fetchEndpoint]);
   useEffect(() => {
     if (!activeLayers.cctv) return;
     return loadCameraCatalog(cameras => {
@@ -1249,12 +1344,16 @@ export default function Dashboard() {
 
   useEffect(() => {
 
-    // Flights
+    // Flights — fetched only when data actually lands. loadFlights releases
+    // the fetched mark on failure and retries with backoff, so a failed
+    // first attempt no longer leaves the layer empty until the 5-minute poll.
     if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) {
-      if (!layerFetchedRef.current.has('flights')) {
-        fetchEndpoint('/api/flights');
-        layerFetchedRef.current.add('flights');
-      }
+      loadFlights();
+    } else {
+      flightsTimersRef.current.forEach(clearTimeout);
+      flightsTimersRef.current = [];
+      flightsRetryPendingRef.current = false;
+      flightsRefetchCountRef.current = 0;
     }
     // Satellites (any satellite sub-layer triggers fetch)
     const anySatLayer = activeLayers.satellites || activeLayers.sat_comms || activeLayers.sat_military || activeLayers.sat_navigation || activeLayers.sat_earth || activeLayers.sat_science;
@@ -1357,14 +1456,21 @@ export default function Dashboard() {
     }
 
 
-  }, [activeLayers]);
+  }, [activeLayers, loadFlights]);
 
   // ── LAYER-AWARE POLLING — only poll data for active layers ──
   useEffect(() => {
     const intervals: ReturnType<typeof setInterval>[] = [];
     const stopFns: (() => void)[] = [];
     if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/flights'), 300000)); // 5 min (was 2 min)
+      intervals.push(setInterval(() => {
+        fetchEndpoint('/api/flights', normalizeFlightPayload).then(ok => {
+          if (!ok) return;
+          layerFetchedRef.current.add('flights');
+          const d = dataRef.current;
+          setFlightsStatus(isStaleFlightPayload(d) || isPartialFlightPayload(d) ? 'loading' : 'ready');
+        });
+      }, 300000)); // 5 min (was 2 min)
     }
 
     if (activeLayers.balloons) {
@@ -2002,7 +2108,7 @@ export default function Dashboard() {
 
       {/* ── LIVE COUNTER STRIP ── */}
       <motion.div data-hud initial={{ opacity: 0, y: -8 }} animate={revealed ? { opacity: 1, y: 0 } : { opacity: 0, y: -8 }} transition={hudIn(0.4)} className="absolute z-[190] pointer-events-none" style={{ left: isMobile ? '24px' : '108px', top: isMobile ? '82px' : '96px' }}>
-        <LiveCounterStrip dataRef={dataRef} />
+        <LiveCounterStrip dataRef={dataRef} flightsStatus={flightsStatus} />
       </motion.div>
 
 
@@ -2076,10 +2182,13 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
-          <button onClick={takeMeSomewhereLive} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title={cameraCount > 0 ? 'Take me somewhere live — a random live camera, somewhere on Earth' : 'Take me somewhere live — the camera catalogue is still loading'} aria-label="Take me somewhere live">
-            {cameraCount > 0
-              ? <Dices className={`w-4 h-4 ${spooky ? 'text-[#FF7518]' : 'text-white/60'}`} />
-              : <span aria-hidden="true" className="block w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-transparent animate-spin" />}
+          <button onClick={takeMeSomewhereLive} className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50" title={roulette.title} aria-label="Take me somewhere live">
+            <span className="relative block">
+              <Dices className={`w-4 h-4 ${spooky ? 'text-[#FF7518]' : 'text-white/60'} ${roulette.ready ? '' : 'opacity-40'}`} />
+              {!roulette.ready && (
+                <span aria-hidden="true" className="absolute -right-1 -top-1 block h-2 w-2 rounded-full border border-white/50 border-t-transparent animate-spin" />
+              )}
+            </span>
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SOMEWHERE LIVE</span>
         </div>
@@ -2579,6 +2688,24 @@ export default function Dashboard() {
             )}
           </AnimatePresence>
         </>
+      )}
+
+      {/* ── ROULETTE FAB (mobile/touch) ── */}
+      {/* The dice lives in the TV drawer on mobile, which is one drawer too
+          deep on a tablet. A floating button puts it on the map itself —
+          no drawer to open. Hidden while a drawer, the planner, or
+          guidance is open, and until the HUD reveals. */}
+      {shouldShowRouletteFab({ isMobile, mobilePanel, showDirections, navSession }) && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: revealed ? 1 : 0 }} transition={hudIn(0.3)} className="fixed z-[300] pointer-events-auto" style={{ bottom: 'calc(68px + env(safe-area-inset-bottom, 0px))', right: '12px' }}>
+          <button onClick={takeMeSomewhereLive} aria-label="Take me somewhere live" title={roulette.title} className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-primary)] bg-[var(--bg-panel)] shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+            <span className="relative block">
+              <Dices className={`h-5 w-5 ${spooky ? 'text-[#FF7518]' : 'text-[var(--gold-primary)]'} ${roulette.ready ? '' : 'opacity-40'}`} />
+              {!roulette.ready && (
+                <span aria-hidden="true" className="absolute -right-1 -top-1 block h-2 w-2 rounded-full border border-[var(--text-muted)] border-t-transparent animate-spin" />
+              )}
+            </span>
+          </button>
+        </motion.div>
       )}
 
       {/* ── BACK FAB (mobile/touch) ── */}

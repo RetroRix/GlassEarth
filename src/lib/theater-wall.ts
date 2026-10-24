@@ -219,6 +219,42 @@ export function pickRouletteCamera(
 }
 
 /**
+ * The roulette button's own state, shared by the desktop strip, the mobile
+ * floating button, and the TV drawer row so the control is recognisable
+ * everywhere: the dice icon is ALWAYS shown. While the camera catalogue is
+ * still loading the dice is dimmed with a small loading badge — never a
+ * bare spinner, which on a slow connection reads as "there is no roulette
+ * button here". Tapping while loading still queues the spin (the pending-spin
+ * behaviour in page.tsx), so `ready: false` dims the button, it does not
+ * disable it.
+ */
+export interface RouletteControlState {
+  ready: boolean;
+  title: string;
+}
+
+export function rouletteControlState(cameraCount: number): RouletteControlState {
+  return cameraCount > 0
+    ? { ready: true, title: 'Take me somewhere live — a random live camera, somewhere on Earth' }
+    : { ready: false, title: 'Take me somewhere live — the camera catalogue is still loading' };
+}
+/**
+ * Whether the floating roulette button belongs on the map: touch layout,
+ * and nothing else open on top of it — no drawer, no route planner, no
+ * active guidance session. The dice lives in the TV drawer on mobile, which
+ * is one drawer too deep on a tablet; the FAB puts it on the map itself.
+ */
+export function shouldShowRouletteFab(args: {
+  isMobile: boolean;
+  mobilePanel: string | null;
+  showDirections: boolean;
+  navSession: unknown;
+}): boolean {
+  return args.isMobile && args.mobilePanel === null && !args.showDirections && !args.navSession;
+}
+
+
+/**
  * The slice of `pool` showing at rotation step `tick`: whole pages, wrapping
  * around the end. With a pool no bigger than the page this is just the pool.
  */
