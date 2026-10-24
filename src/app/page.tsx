@@ -8,7 +8,7 @@ import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, type WallCamera } from '@/lib/theater-wall';
 import { decodeShareView, type SharedView } from '@/lib/share-view';
-import { isHalloweenWindow, hasSpookyPreview } from '@/lib/seasonal';
+import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
 import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
@@ -720,12 +720,18 @@ export default function Dashboard() {
 
   /* Splash: it lifts once the map has drawn its first frame. It never lifts
      before the intro has played (about 2.2 s), and never later than 7 s, so a
-     machine that cannot start the map still reaches the platform. */
+     machine that cannot start the map still reaches the platform. In the
+     Halloween window the splash is the pumpkin globe's stage, so the
+     failsafe stretches to 12 s — otherwise it would cut the spooky stage-3
+     hold short on a merely slow load (see the stage-3 effect below). The
+     failsafe is read from the same gate expression the `spooky` store
+     uses, so this mount-once effect needs no reactive dep for it. */
   useEffect(() => {
+    const spookyAtMount = isHalloweenWindow() || hasSpookyPreview(window.location.search);
     const timers = [
       setTimeout(() => setSplashStage(s => Math.max(s, 1)), 1100),
       setTimeout(() => setSplashStage(s => Math.max(s, 2)), 1700),
-      setTimeout(() => setShowSplash(false), 7000),
+      setTimeout(() => setShowSplash(false), spookyAtMount ? SPOOKY_SPLASH_FAILSAFE_MS : SPLASH_FAILSAFE_MS),
     ];
     return () => timers.forEach(clearTimeout);
   }, []);
@@ -736,10 +742,13 @@ export default function Dashboard() {
   }, [mapReady, splashStage]);
   useEffect(() => {
     if (splashStage !== 3) return;
-    // Long enough to read SYSTEM READY before the splash goes.
-    const t = setTimeout(() => setShowSplash(false), 550);
+    // Normally just long enough to read SYSTEM READY. In the Halloween
+    // window the splash is the pumpkin's stage: hold it ~4.5 s so the globe
+    // can actually be looked at. Tap-to-dismiss (on the splash itself, in
+    // the window only) is the escape hatch for repeat visitors.
+    const t = setTimeout(() => setShowSplash(false), spooky ? SPOOKY_STAGE3_HOLD_MS : SPLASH_STAGE3_HOLD_MS);
     return () => clearTimeout(t);
-  }, [splashStage]);
+  }, [splashStage, spooky]);
 
   /* Fly from the globe down to home base (El Paso) once the splash has gone.
      Starting as it began to fade meant a busy first load (the satellite
@@ -1497,6 +1506,11 @@ export default function Dashboard() {
             // behind it instead of just dissolving.
             exit={{ opacity: 0, scale: 1.04 }}
             transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
+            // Tap-to-dismiss, Halloween window only: the spooky splash holds
+            // ~4.5 s past SYSTEM READY, and repeat visitors can skip it with
+            // a tap instead of waiting. Outside the window there is no
+            // handler at all — the splash behaves exactly as before.
+            onPointerDown={spooky ? () => setShowSplash(false) : undefined}
             className="absolute inset-0 z-[999] flex flex-col items-center justify-center overflow-hidden"
             style={{ background: 'radial-gradient(ellipse at center, #0a0a14 0%, var(--bg-void) 70%)' }}
           >

@@ -42,3 +42,21 @@ export function hasSpookyPreview(search: string): boolean {
 export function isSpookySeason(date: Date = new Date(), search?: string): boolean {
   return isHalloweenWindow(date) || (search !== undefined && hasSpookyPreview(search));
 }
+
+/**
+ * Splash dwell times. The normal values are the long-standing ones (stage 3
+ * — SYSTEM READY — lingers just long enough to read, and the failsafe
+ * guarantees the splash never traps anyone past 7 s if the map stalls).
+ *
+ * In the Halloween window the splash is the pumpkin globe's stage, so it
+ * gets a longer dwell: stage 3 holds 4.5 s instead of 550 ms, and the
+ * failsafe stretches to 12 s so it can never cut that hold short on a
+ * fast load (stage 3 lands ~2.2 s in, + 4.5 s = ~6.7 s, well inside 12 s).
+ * Tap-to-dismiss on the splash itself is the escape hatch for repeat
+ * visitors. These live here — not inline in page.tsx — so tests can pin
+ * the arithmetic instead of trusting magic numbers in a component.
+ */
+export const SPLASH_STAGE3_HOLD_MS = 550;
+export const SPOOKY_STAGE3_HOLD_MS = 4500;
+export const SPLASH_FAILSAFE_MS = 7000;
+export const SPOOKY_SPLASH_FAILSAFE_MS = 12000;
