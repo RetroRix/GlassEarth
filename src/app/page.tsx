@@ -30,6 +30,7 @@ import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import WorldRemote from '@/components/WorldRemote';
 import BrandGlobe from '@/components/BrandGlobe';
+import PumpkinGlobe from '@/components/PumpkinGlobe';
 import ArcGISPanel from '@/components/ArcGISPanel';
 import TvPanel from '@/components/TvPanel';
 import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
@@ -1517,8 +1518,11 @@ export default function Dashboard() {
 
 
 
-            {/* ── Splash logo — orbiting rings around the G Cut ── */}
-            <div className="relative w-40 h-40 mb-8 flex items-center justify-center z-[2]">
+            {/* ── Splash logo — orbiting rings around the globe mark.
+                During the Halloween window the mark is the pumpkin globe
+                (hero size); the swap happens while the globe is still at
+                its initial opacity 0, so no normal-globe frame flashes. ── */}
+            <div className={`relative mb-8 flex items-center justify-center z-[2] ${spooky ? 'w-52 h-52 md:w-64 md:h-64' : 'w-40 h-40'}`}>
               {/* Outer ring — slow clockwise */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.6, rotate: 0 }}
@@ -1543,15 +1547,21 @@ export default function Dashboard() {
                 <div className="absolute bottom-0 left-1/4 translate-y-1/2 w-1 h-1 rounded-full" style={{ background: 'rgba(0,229,255,0.4)' }} />
               </motion.div>
 
-              {/* ── Glass Earth logo — the G Cut, as a living globe ── */}
+              {/* ── Globe mark — normal G Cut, or the pumpkin during
+                  the Halloween window (boot screen only; the header
+                  mark is untouched) ── */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.5 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.4, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
-                className="relative w-24 h-24 rounded-[20%] z-[2]"
-                style={{ boxShadow: '0 0 32px rgba(56,189,248,0.22), 0 0 64px rgba(212,175,55,0.08)' }}
+                className={`relative z-[2] ${spooky ? 'w-full h-full rounded-full' : 'w-24 h-24 rounded-[20%]'}`}
+                style={{ boxShadow: spooky ? '0 0 40px rgba(255,117,24,0.35), 0 0 80px rgba(255,117,24,0.15)' : '0 0 32px rgba(56,189,248,0.22), 0 0 64px rgba(212,175,55,0.08)' }}
               >
-                <BrandGlobe className="w-full h-full" title="Glass Earth logo" />
+                {spooky ? (
+                  <PumpkinGlobe className="w-full h-full" title="Glass Earth Halloween logo" />
+                ) : (
+                  <BrandGlobe className="w-full h-full" title="Glass Earth logo" />
+                )}
               </motion.div>
 
               {/* Faint pulsing radar sweep */}
