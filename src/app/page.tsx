@@ -816,35 +816,25 @@ export default function Dashboard() {
   /* Remember the last settled view, so return visits open where the visitor
      left off. mapView only changes on moveend, so mid-flight states never
      reach storage; the zoom guard keeps the initial globe view (zoom 2.5)
-     out, and the splash guard keeps the opening flight's own start out. */
-  const lastViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!splashGone) return;
-    const { latitude, longitude, zoom } = mapView;
-    if (zoom <= 3 || !isValidLatLon(latitude, longitude)) return;
-    if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
-    lastViewTimer.current = setTimeout(() => {
-      writeLastView({ lat: latitude, lng: longitude, zoom });
-    }, 1500);
-    return () => {
-      if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
-    };
-  }, [mapView, splashGone]);
-
-  /* View history (the Back button): record settled views so Back can walk
-     back through them — roulette jumps, camera opens, search flights, preset
-     jumps, and the opening view itself, which is the stack's base. mapView
-     only changes on moveend, so mid-flight states never reach the stack; the
-     zoom guard keeps the initial globe view out, and the splash guard keeps
-     the opening flight's own start out. In-memory only — last-view
-     persistence already covers return visits. */
+     out, and the splash guard keeps the opening flight's own start out.
+     The Back button's history rides the same debounced timer: only the view
+     the visitor actually settled on is recorded, and the button state
+     updates off the effect's synchronous path. */
   const [viewHistory] = useState(() => createViewHistory());
   const [canGoBack, setCanGoBack] = useState(false);
+  const lastViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!splashGone) return;
     const { latitude, longitude, zoom, bearing, pitch } = mapView;
     if (zoom <= 3 || !isValidLatLon(latitude, longitude)) return;
-    setCanGoBack(viewHistory.record({ lat: latitude, lng: longitude, zoom, bearing, pitch }));
+    if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
+    lastViewTimer.current = setTimeout(() => {
+      writeLastView({ lat: latitude, lng: longitude, zoom });
+      setCanGoBack(viewHistory.record({ lat: latitude, lng: longitude, zoom, bearing, pitch }));
+    }, 1500);
+    return () => {
+      if (lastViewTimer.current) clearTimeout(lastViewTimer.current);
+    };
   }, [mapView, splashGone, viewHistory]);
 
   /* Back: fly to the previous view with the same mechanism as every other

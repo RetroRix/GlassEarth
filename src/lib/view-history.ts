@@ -19,9 +19,10 @@
  * is never re-recorded: no loops, no extra guard flag needed.
  *
  * Only settled views are recorded (the page feeds this from the moveend-
- * driven mapView, never mid-flight), and only SIGNIFICANT ones — a pan
- * wiggle must not fill the stack. The page also guards the globe view
- * (zoom <= 3) and the splash the same way the last-view writer does.
+ * driven mapView, debounced through the last-view timer), and only
+ * SIGNIFICANT ones — a pan wiggle must not fill the stack. The page also
+ * guards the globe view (zoom <= 3) and the splash the same way the
+ * last-view writer does.
  */
 
 /** One settled map view: where the camera sits and how it looks. */
