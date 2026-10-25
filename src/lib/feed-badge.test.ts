@@ -46,16 +46,42 @@ describe('deriveFeedBadge', () => {
   });
 
   it('never invents a timelapse badge', () => {
-    // The taxonomy is live-video / live-still only; every derivation above
-    // returns one of those two kinds or null.
+    // The taxonomy is live-video / live-still / unavailable only; every
+    // derivation above returns one of those three kinds or null.
     const kinds = ['hls', 'mp4', 'mjpeg', 'iframe', 'jpg', null] as const;
     const states = ['playing', 'held', 'degraded', 'not-ready'] as const;
     for (const mediaKind of kinds) {
       for (const state of states) {
         const badge = deriveFeedBadge({ mediaKind, state, hasSnapshot: true });
-        expect(badge === null || badge.kind === 'live-video' || badge.kind === 'live-still').toBe(true);
+        expect(
+          badge === null ||
+            badge.kind === 'live-video' ||
+            badge.kind === 'live-still' ||
+            badge.kind === 'unavailable',
+        ).toBe(true);
       }
     }
+  });
+
+  it('calls a placeholder snapshot UNAVAILABLE with no age', () => {
+    expect(deriveFeedBadge({ mediaKind: 'jpg', state: 'playing', hasSnapshot: true, placeholder: true }))
+      .toEqual({ kind: 'unavailable', demoted: false, showAge: false });
+    // A demoted video whose snapshot is a placeholder is unavailable too —
+    // the picture is the operator's graphic, not a frame.
+    expect(deriveFeedBadge({ mediaKind: 'hls', state: 'degraded', hasSnapshot: true, placeholder: true }))
+      .toEqual({ kind: 'unavailable', demoted: false, showAge: false });
+  });
+
+  it('never relabels a playing stream as unavailable', () => {
+    // The snapshot is not on screen while video plays, so a placeholder
+    // verdict about it must not touch the LIVE VIDEO badge.
+    expect(deriveFeedBadge({ mediaKind: 'hls', state: 'playing', hasSnapshot: true, placeholder: true }))
+      .toEqual({ kind: 'live-video', demoted: false, showAge: false });
+  });
+
+  it('keeps a real snapshot LIVE STILL when the check says no', () => {
+    expect(deriveFeedBadge({ mediaKind: 'jpg', state: 'playing', hasSnapshot: true, placeholder: false }))
+      .toEqual({ kind: 'live-still', demoted: false, showAge: true });
   });
 });
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CameraOff, PauseCircle } from 'lucide-react';
 import { freshen, refreshInterval } from '@/lib/camera-preview';
 import { deriveFeedBadge, isStreamDead, markStreamDead } from '@/lib/feed-badge';
+import { usePlaceholder } from '@/lib/placeholder-check';
 import FeedBadgeView from './FeedBadge';
 import { wallMedia, type WallCamera, type WallMediaKind } from '@/lib/theater-wall';
 import './CameraTileMedia.css';
@@ -240,6 +241,20 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
   const ambient = variant === 'ambient';
   const fit = ambient ? AMBIENT_FIT : FIT;
 
+  /* A stream that died on another surface this session is never re-attempted
+     here: the tile opens on the snapshot, wearing STILL. */
+  const registryDead = isStreamDead(cam.id);
+  const effectiveDegraded = degraded || (registryDead && Boolean(cam.feed_url));
+
+  /* A snapshot on screen can be an agency placeholder instead of a frame —
+     the check runs only once a snapshot frame has arrived, only for
+     snapshots (an MJPEG tile is a stream), and only where the badge shows:
+     Ambient opts out, so it never checks. */
+  const isVideoKind = media !== null && (media.kind === 'mp4' || media.kind === 'hls' || media.kind === 'iframe');
+  const snapshotShown = frameAt !== null && media !== null && Boolean(cam.feed_url) &&
+    (effectiveDegraded || media.kind === 'jpg' || (isVideoKind && !playVideo));
+  const placeholder = usePlaceholder(cam.feed_url, snapshotShown && showBadge);
+
   /* Each tile is keyed by camera id by its parents, so a slot changing hands
      remounts this component — no failure state leaks between cameras. */
   if (failed) {
@@ -249,10 +264,6 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
     return <Still icon={<CameraOff className="h-5 w-5 text-white/35" />} title="No direct feed" sub="This camera opens in the full viewer" />;
   }
 
-  /* A stream that died on another surface this session is never re-attempted
-     here: the tile opens on the snapshot, wearing STILL. */
-  const registryDead = isStreamDead(cam.id);
-  const effectiveDegraded = degraded || (registryDead && Boolean(cam.feed_url));
   const onFrame = () => setFrameAt(Date.now());
   /* A failed stream is dead for the session — and its badge flips to STILL
      with it. The mark is what stops the next surface re-attempting it. */
@@ -313,13 +324,14 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
   /* The badge describes what is actually on screen: LIVE VIDEO only once
      a stream has produced a frame, LIVE STILL with the frame's age once a
      snapshot has — a held or degraded video wears STILL, because a still
-     is what the viewer is looking at. */
+     is what the viewer is looking at. A placeholder wears UNAVAILABLE. */
   const isVideo = media.kind === 'mp4' || media.kind === 'hls' || media.kind === 'iframe';
   const shown = ready || frameAt !== null;
   const badge = deriveFeedBadge({
     mediaKind: effectiveDegraded ? 'jpg' : media.kind,
     state: !shown ? 'not-ready' : effectiveDegraded ? 'degraded' : isVideo && !playVideo ? 'held' : 'playing',
     hasSnapshot: Boolean(cam.feed_url),
+    placeholder,
   });
   if (!showBadge || !badge) return <>{content}</>;
   return (

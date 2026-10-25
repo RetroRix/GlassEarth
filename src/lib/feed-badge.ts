@@ -53,7 +53,7 @@ export const LIVE_VIDEO_KINDS: ReadonlySet<BadgeMediaKind> = new Set<BadgeMediaK
 export type FeedBadgeState = 'playing' | 'held' | 'degraded' | 'not-ready';
 
 export interface FeedBadge {
-  kind: 'live-video' | 'live-still';
+  kind: 'live-video' | 'live-still' | 'unavailable';
   /** The video failed and the snapshot is standing in for it. */
   demoted: boolean;
   /** The badge carries a frame age — only stills have one. */
@@ -64,6 +64,16 @@ export interface DeriveFeedBadgeInput {
   mediaKind: BadgeMediaKind | null;
   state: FeedBadgeState;
   hasSnapshot: boolean;
+  /**
+   * The snapshot on screen is one of the agency's placeholder graphics,
+   * not a camera frame (see lib/placeholder). A placeholder is not a
+   * still — it wears UNAVAILABLE with no age, because an age on a
+   * placeholder would claim a freshness the picture does not have.
+   * Only ever applied to a badge that would otherwise be LIVE STILL: a
+   * playing stream never shows its snapshot, so there is nothing to
+   * re-label there.
+   */
+  placeholder?: boolean;
 }
 
 /**
@@ -71,23 +81,34 @@ export interface DeriveFeedBadgeInput {
  * honest to claim (still loading, or a dead stream with no snapshot to
  * stand in for it).
  */
-export function deriveFeedBadge({ mediaKind, state, hasSnapshot }: DeriveFeedBadgeInput): FeedBadge | null {
+export function deriveFeedBadge({ mediaKind, state, hasSnapshot, placeholder }: DeriveFeedBadgeInput): FeedBadge | null {
   if (!mediaKind || state === 'not-ready') return null;
 
+  let badge: FeedBadge | null;
   if (LIVE_VIDEO_KINDS.has(mediaKind)) {
-    if (state === 'playing') return { kind: 'live-video', demoted: false, showAge: false };
-    /* Held or degraded, the picture is a snapshot — say so. Without one
-       there is no picture at all, and the tile's own Still card speaks. */
-    if (state === 'held' || state === 'degraded') {
-      return hasSnapshot
+    if (state === 'playing') {
+      badge = { kind: 'live-video', demoted: false, showAge: false };
+    } else if (state === 'held' || state === 'degraded') {
+      /* Held or degraded, the picture is a snapshot — say so. Without one
+         there is no picture at all, and the tile's own Still card speaks. */
+      badge = hasSnapshot
         ? { kind: 'live-still', demoted: state === 'degraded', showAge: true }
         : null;
+    } else {
+      badge = null;
     }
-    return null;
+  } else {
+    /* 'jpg' is a snapshot in every state — the only kind that is one. */
+    badge = { kind: 'live-still', demoted: false, showAge: true };
   }
 
-  /* 'jpg' is a snapshot in every state — the only kind that is one. */
-  return { kind: 'live-still', demoted: false, showAge: true };
+  /* A placeholder wears UNAVAILABLE, never LIVE STILL: the picture is the
+     operator's graphic, and an age on it would claim a freshness it does
+     not have. A playing stream is untouched — its snapshot is not on screen. */
+  if (badge?.kind === 'live-still' && placeholder) {
+    return { kind: 'unavailable', demoted: false, showAge: false };
+  }
+  return badge;
 }
 
 /**

@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Maximize2 } from 'lucide-react';
 import { freshen, previewMedia, refreshInterval, snapshotFallbackMedia, VIDEO_KINDS, type PreviewKind } from '@/lib/camera-preview';
 import { deriveFeedBadge, isStreamDead, markStreamDead } from '@/lib/feed-badge';
+import { usePlaceholder } from '@/lib/placeholder-check';
 import FeedBadgeView from './FeedBadge';
 import { layoutTile, tileHeight, tilesOverlap, type TileGeometry } from '@/lib/map-tile-layout';
 import type { Map as MlMap } from 'maplibre-gl';
@@ -215,10 +216,6 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
     else setFailed(true);
   }, [degraded, camera]);
 
-  /* A camera that will not load is worse than no tile: it is a broken box
-     sitting over the map claiming to be a feed. */
-  if (failed) return null;
-
   /* A stream that died on another surface this session is never re-attempted
      here: the tile opens on the snapshot, wearing STILL. Stream-only cameras
      have no snapshot to stand in, so the registry cannot spare them. */
@@ -228,14 +225,26 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
     ? { ...camera, media: snapshotFallbackMedia(camera) ?? camera.media }
     : camera;
 
+  /* A snapshot on screen can be an agency placeholder instead of a frame —
+     the check runs only once a snapshot has actually loaded, and only for
+     snapshots: an MJPEG tile is a stream, not a still. */
+  const snapshotShown = shownCam.media.kind === 'jpg' && loaded;
+  const placeholder = usePlaceholder(shownCam.feed_url, snapshotShown);
+
   /* The badge describes what is actually on screen: LIVE VIDEO only once
      a stream has produced a frame, LIVE STILL with the frame's age once a
-     snapshot has — nothing before the first frame. */
+     snapshot has — nothing before the first frame. A placeholder wears
+     UNAVAILABLE instead of STILL. */
   const badge = deriveFeedBadge({
     mediaKind: effectiveDegraded ? 'jpg' : camera.media.kind,
     state: !loaded ? 'not-ready' : effectiveDegraded ? 'degraded' : 'playing',
     hasSnapshot: Boolean(camera.feed_url),
+    placeholder,
   });
+
+  /* A camera that will not load is worse than no tile: it is a broken box
+     sitting over the map claiming to be a feed. */
+  if (failed) return null;
 
   return (
     <button

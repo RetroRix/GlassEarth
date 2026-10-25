@@ -7,6 +7,7 @@ import Hls from 'hls.js';
 import { isHostedOffPlatform, liveFeedAtSource, localEmbed, needsResolution, offPlatformView } from '@/lib/camera-feed';
 import { clearLook, registerVideo } from '@/lib/vision/store';
 import { clearStreamDead, deriveFeedBadge, isStreamDead, markStreamDead, type BadgeMediaKind } from '@/lib/feed-badge';
+import { usePlaceholder } from '@/lib/placeholder-check';
 import CameraVision, { VisionReport } from './CameraVision';
 import FeedBadgeView from './FeedBadge';
 
@@ -108,10 +109,15 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
      video lives at the operator's page (watchLiveUrl) still wears STILL —
      the picture on screen here is a snapshot, and the WATCH LIVE button
      is what says the video exists elsewhere. */
+  /* A snapshot on screen can be an agency placeholder instead of a frame -
+     the check runs only once a snapshot frame has arrived. */
+  const snapshotShown = !externalOnly && streamType === 'jpg' && frameAt !== null && !error;
+  const placeholder = usePlaceholder(camera?.feed_url ?? null, snapshotShown);
   const viewerBadge = !camera ? null : deriveFeedBadge({
     mediaKind: (resolvedEmbed ? 'iframe' : streamType) as BadgeMediaKind,
     state: degraded ? 'degraded' : (videoReady || frameAt !== null) ? 'playing' : 'not-ready',
     hasSnapshot: Boolean(camera.feed_url),
+    placeholder,
   });
 
   useEffect(() => {
@@ -448,7 +454,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                   <span className="text-[9px] text-[var(--text-muted)] font-mono tracking-widest">STATUS</span>
                   {/* Nothing is being received locally for an external feed — don't claim otherwise. */}
                   <span className={`text-[9px] font-mono tracking-widest ${externalOnly ? 'text-[var(--gold-primary)]' : 'text-[var(--alert-green)]'}`}>
-                    {view === 'offline' ? (gone ? 'REMOVED BY SOURCE' : 'OFF AIR AT SOURCE') : watchLiveUrl ? 'LIVE VIDEO AT SOURCE' : externalOnly ? 'HOSTED OFF-PLATFORM' : 'ACTIVE / RECORDING'}
+                    {view === 'offline' ? (gone ? 'REMOVED BY SOURCE' : 'OFF AIR AT SOURCE') : watchLiveUrl ? 'LIVE VIDEO AT SOURCE' : externalOnly ? 'HOSTED OFF-PLATFORM' : streamType === 'jpg' ? 'SNAPSHOT AT SOURCE' : 'ACTIVE / RECORDING'}
                   </span>
                 </div>
               </div>
