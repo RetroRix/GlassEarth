@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { CameraOff, PauseCircle } from 'lucide-react';
 import { freshen, refreshInterval } from '@/lib/camera-preview';
+import { deriveFeedBadge, isStreamDead, markStreamDead } from '@/lib/feed-badge';
+import FeedBadgeView from './FeedBadge';
 import { wallMedia, type WallCamera, type WallMediaKind } from '@/lib/theater-wall';
 import './CameraTileMedia.css';
 
@@ -34,11 +36,13 @@ const AMBIENT_FIT = 'h-full w-full object-contain';
 /** How long an Ambient snapshot takes to crossfade into its successor. */
 const SNAP_FADE_MS = 900;
 
-function SnapshotMedia({ url, kind, name, onFail, imgClassName = FIT, crossfade = false, kenBurns = false }: {
+function SnapshotMedia({ url, kind, name, onFail, onFrame, imgClassName = FIT, crossfade = false, kenBurns = false }: {
   url: string;
   kind: 'jpg' | 'mjpeg';
   name: string;
   onFail: () => void;
+  /** A frame arrived on screen — the LIVE STILL badge's age resets here. */
+  onFrame?: () => void;
   imgClassName?: string;
   crossfade?: boolean;
   kenBurns?: boolean;
@@ -86,7 +90,7 @@ function SnapshotMedia({ url, kind, name, onFail, imgClassName = FIT, crossfade 
   if (!crossfade) {
     return (
       /* eslint-disable-next-line @next/next/no-img-element -- remote camera frames, no loader */
-      <img src={front} alt={name} className={imgClassName} onError={onFail} draggable={false} />
+      <img src={front} alt={name} className={imgClassName} onLoad={onFrame} onError={onFail} draggable={false} />
     );
   }
 
@@ -94,7 +98,7 @@ function SnapshotMedia({ url, kind, name, onFail, imgClassName = FIT, crossfade 
     <div className="relative h-full w-full overflow-hidden">
       <div className={`absolute inset-0 ${kenBurns ? 'ambient-kenburns' : ''}`}>
         {/* eslint-disable-next-line @next/next/no-img-element -- remote camera frames, no loader */}
-        <img src={front} alt={name} className={`${imgClassName} absolute inset-0`} onError={onFail} draggable={false} />
+        <img src={front} alt={name} className={`${imgClassName} absolute inset-0`} onLoad={onFrame} onError={onFail} draggable={false} />
         {back && (
           /* eslint-disable-next-line @next/next/no-img-element -- remote camera frames, no loader */
           <img
@@ -103,7 +107,7 @@ function SnapshotMedia({ url, kind, name, onFail, imgClassName = FIT, crossfade 
             aria-hidden
             className={`${imgClassName} absolute inset-0 transition-opacity ease-in-out`}
             style={{ opacity: backIn ? 1 : 0, transitionDuration: `${SNAP_FADE_MS}ms` }}
-            onLoad={() => setBackIn(true)}
+            onLoad={() => { setBackIn(true); onFrame?.(); }}
             /* A frame that fails to arrive is simply skipped — the one on
                screen stays up, and the next refresh tries again. */
             onError={() => { setBack(null); setBackIn(false); }}
@@ -115,7 +119,14 @@ function SnapshotMedia({ url, kind, name, onFail, imgClassName = FIT, crossfade 
   );
 }
 
-function VideoMedia({ url, kind, onFail, fitClass = FIT }: { url: string; kind: 'mp4' | 'hls'; onFail: () => void; fitClass?: string }) {
+function VideoMedia({ url, kind, onFail, onReady, fitClass = FIT }: {
+  url: string;
+  kind: 'mp4' | 'hls';
+  onFail: () => void;
+  /** The first frame decoded — the LIVE VIDEO badge's honest starting line. */
+  onReady?: () => void;
+  fitClass?: string;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
   /* MP4 clips are short and loop, so they go stale; re-pointing refreshes
      them. HLS is already live and refreshInterval says 0 for it. */
@@ -166,7 +177,7 @@ function VideoMedia({ url, kind, onFail, fitClass = FIT }: { url: string; kind: 
     return () => { cancelled = true; hls?.destroy(); };
   }, [kind, url, cacheBust, onFail]);
 
-  return <video ref={ref} className={fitClass} muted playsInline loop autoPlay preload="auto" onError={onFail} />;
+  return <video ref={ref} className={fitClass} muted playsInline loop autoPlay preload="auto" onLoadedData={onReady} onError={onFail} />;
 }
 
 function Still({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
@@ -210,13 +221,20 @@ function AmbientBackdrop({ cam, media, children }: {
   );
 }
 
-export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile' }: {
+export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile', showBadge = true }: {
   cam: WallCamera;
   playVideo?: boolean;
   variant?: 'tile' | 'ambient';
+  /** Ambient TV is a lean-back screensaver — a trust mark adds nothing
+     there, so it opts out; the wall keeps it. */
+  showBadge?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const [degraded, setDegraded] = useState(false);
+  /* First frame decoded (video) — the LIVE VIDEO badge's starting line. */
+  const [ready, setReady] = useState(false);
+  /* When the frame on screen arrived (snapshot) — the LIVE STILL age. */
+  const [frameAt, setFrameAt] = useState<number | null>(null);
   const media = wallMedia(cam);
   const name = cam.name ?? 'CAMERA';
   const ambient = variant === 'ambient';
@@ -231,52 +249,85 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
     return <Still icon={<CameraOff className="h-5 w-5 text-white/35" />} title="No direct feed" sub="This camera opens in the full viewer" />;
   }
 
+  /* A stream that died on another surface this session is never re-attempted
+     here: the tile opens on the snapshot, wearing STILL. */
+  const registryDead = isStreamDead(cam.id);
+  const effectiveDegraded = degraded || (registryDead && Boolean(cam.feed_url));
+  const onFrame = () => setFrameAt(Date.now());
+  /* A failed stream is dead for the session — and its badge flips to STILL
+     with it. The mark is what stops the next surface re-attempting it. */
+  const onVideoFail = () => {
+    markStreamDead(cam.id);
+    if (cam.feed_url) setDegraded(true);
+    else setFailed(true);
+  };
+
   /* A dead stream degrades to the snapshot when one exists — a stale Caltrans
      stream name still shows a picture. Only a camera with nothing to show at
      all goes blank. */
-  if (degraded && cam.feed_url) {
+  let content: React.ReactNode;
+  if (effectiveDegraded && cam.feed_url) {
     const el = (
-      <SnapshotMedia url={cam.feed_url} kind="jpg" name={name} onFail={() => setFailed(true)} imgClassName={fit} crossfade={ambient} kenBurns={ambient} />
+      <SnapshotMedia url={cam.feed_url} kind="jpg" name={name} onFail={() => setFailed(true)} onFrame={onFrame} imgClassName={fit} crossfade={ambient} kenBurns={ambient} />
     );
-    return ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
-  }
-
-  const isVideo = media.kind === 'mp4' || media.kind === 'hls' || media.kind === 'iframe';
-  if (isVideo && !playVideo) {
+    content = ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
+  } else if ((media.kind === 'mp4' || media.kind === 'hls' || media.kind === 'iframe') && !playVideo) {
     /* Held back by the decoder budget: a snapshot if the camera publishes
        one, a labelled still if it does not. */
     if (cam.feed_url) {
-      return <SnapshotMedia url={cam.feed_url} kind="jpg" name={name} onFail={() => setFailed(true)} imgClassName={fit} crossfade={ambient} kenBurns={ambient} />;
+      content = <SnapshotMedia url={cam.feed_url} kind="jpg" name={name} onFail={() => setFailed(true)} onFrame={onFrame} imgClassName={fit} crossfade={ambient} kenBurns={ambient} />;
+    } else {
+      return <Still icon={<PauseCircle className="h-5 w-5 text-white/35" />} title="Video held" sub="Focus this tile to play it" />;
     }
-    return <Still icon={<PauseCircle className="h-5 w-5 text-white/35" />} title="Video held" sub="Focus this tile to play it" />;
-  }
-
-  if (media.kind === 'jpg' || media.kind === 'mjpeg') {
+  } else if (media.kind === 'jpg' || media.kind === 'mjpeg') {
     const el = (
       <SnapshotMedia
         url={media.url}
         kind={media.kind}
         name={name}
         onFail={() => setFailed(true)}
+        onFrame={onFrame}
         imgClassName={fit}
         crossfade={ambient}
         kenBurns={ambient && media.kind === 'jpg'}
       />
     );
-    return ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
+    content = ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
+  } else if (media.kind === 'mp4' || media.kind === 'hls') {
+    const el = <VideoMedia url={media.url} kind={media.kind} onFail={onVideoFail} onReady={() => setReady(true)} fitClass={fit} />;
+    content = ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
+  } else {
+    content = (
+      <iframe
+        src={media.url}
+        title={name}
+        className="h-full w-full border-0"
+        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+        allowFullScreen
+        onLoad={() => setReady(true)}
+        onError={() => setFailed(true)}
+      />
+    );
   }
-  if (media.kind === 'mp4' || media.kind === 'hls') {
-    const el = <VideoMedia url={media.url} kind={media.kind} onFail={() => { if (cam.feed_url) setDegraded(true); else setFailed(true); }} fitClass={fit} />;
-    return ambient ? <AmbientBackdrop cam={cam} media={media}>{el}</AmbientBackdrop> : el;
-  }
+
+  /* The badge describes what is actually on screen: LIVE VIDEO only once
+     a stream has produced a frame, LIVE STILL with the frame's age once a
+     snapshot has — a held or degraded video wears STILL, because a still
+     is what the viewer is looking at. */
+  const isVideo = media.kind === 'mp4' || media.kind === 'hls' || media.kind === 'iframe';
+  const shown = ready || frameAt !== null;
+  const badge = deriveFeedBadge({
+    mediaKind: effectiveDegraded ? 'jpg' : media.kind,
+    state: !shown ? 'not-ready' : effectiveDegraded ? 'degraded' : isVideo && !playVideo ? 'held' : 'playing',
+    hasSnapshot: Boolean(cam.feed_url),
+  });
+  if (!showBadge || !badge) return <>{content}</>;
   return (
-    <iframe
-      src={media.url}
-      title={name}
-      className="h-full w-full border-0"
-      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-      allowFullScreen
-      onError={() => setFailed(true)}
-    />
+    <div className="relative h-full w-full">
+      {content}
+      <div className="pointer-events-none absolute left-2 top-2 z-10">
+        <FeedBadgeView badge={badge} frameAt={frameAt} />
+      </div>
+    </div>
   );
 }

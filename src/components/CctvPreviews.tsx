@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Maximize2 } from 'lucide-react';
 import { freshen, previewMedia, refreshInterval, snapshotFallbackMedia, VIDEO_KINDS, type PreviewKind } from '@/lib/camera-preview';
+import { deriveFeedBadge, isStreamDead, markStreamDead } from '@/lib/feed-badge';
+import FeedBadgeView from './FeedBadge';
 import { layoutTile, tileHeight, tilesOverlap, type TileGeometry } from '@/lib/map-tile-layout';
 import type { Map as MlMap } from 'maplibre-gl';
 
@@ -193,15 +195,23 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [degraded, setDegraded] = useState(false);
+  /* When the frame on screen arrived — the LIVE STILL badge's age is the
+     time since this frame loaded, never a guess. */
+  const [frameAt, setFrameAt] = useState<number | null>(null);
 
   /* No reset needed on the way in: each tile is keyed by camera id, so a slot
      changing hands remounts this component with fresh state. */
-  const onReady = useCallback(() => setLoaded(true), []);
+  const onReady = useCallback(() => { setLoaded(true); setFrameAt(Date.now()); }, []);
   /* A dead stream degrades to the snapshot when one exists — a stale Caltrans
      stream name still shows a picture. Only a camera with nothing to show at
-     all vanishes. */
+     all vanishes. The failure also marks the stream dead for the session, so
+     the next surface that opens this camera starts on the snapshot instead
+     of re-attempting a stream that just failed. MJPEG is a stream too, even
+     though it renders through an <img>: a dead one degrades the same way. */
   const onFail = useCallback(() => {
-    if (!degraded && VIDEO_KINDS.has(camera.media.kind) && camera.feed_url) setDegraded(true);
+    const isStream = VIDEO_KINDS.has(camera.media.kind) || camera.media.kind === 'mjpeg';
+    if (isStream) markStreamDead(camera.id);
+    if (!degraded && isStream && camera.feed_url) setDegraded(true);
     else setFailed(true);
   }, [degraded, camera]);
 
@@ -209,9 +219,23 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
      sitting over the map claiming to be a feed. */
   if (failed) return null;
 
-  const shownCam = degraded
+  /* A stream that died on another surface this session is never re-attempted
+     here: the tile opens on the snapshot, wearing STILL. Stream-only cameras
+     have no snapshot to stand in, so the registry cannot spare them. */
+  const registryDead = isStreamDead(camera.id);
+  const effectiveDegraded = degraded || (registryDead && Boolean(camera.feed_url));
+  const shownCam = effectiveDegraded
     ? { ...camera, media: snapshotFallbackMedia(camera) ?? camera.media }
     : camera;
+
+  /* The badge describes what is actually on screen: LIVE VIDEO only once
+     a stream has produced a frame, LIVE STILL with the frame's age once a
+     snapshot has — nothing before the first frame. */
+  const badge = deriveFeedBadge({
+    mediaKind: effectiveDegraded ? 'jpg' : camera.media.kind,
+    state: !loaded ? 'not-ready' : effectiveDegraded ? 'degraded' : 'playing',
+    hasSnapshot: Boolean(camera.feed_url),
+  });
 
   return (
     <button
@@ -229,7 +253,7 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
         }}
       >
         <div className="h-full w-full transition-opacity duration-500" style={{ opacity: loaded ? 1 : 0 }}>
-          {VIDEO_KINDS.has(camera.media.kind) && !degraded
+          {VIDEO_KINDS.has(camera.media.kind) && !effectiveDegraded
             ? <VideoMedia cam={camera} onReady={onReady} onFail={onFail} />
             : <ImageMedia cam={shownCam} onReady={onReady} onFail={onFail} />}
         </div>
@@ -258,10 +282,15 @@ function Tile({ cam: camera, onOpen }: { cam: PreviewCamera; onOpen: (cam: Previ
           />
         ))}
 
-        <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center gap-1 bg-black/70 px-1 py-[1px]">
-          <span className="h-1 w-1 rounded-full bg-[var(--alert-red)] animate-pulse" />
-          <span className="font-mono text-[7px] tracking-[0.18em] text-white/75">LIVE</span>
-        </div>
+        {/* The honest badge, top-left where the old LIVE chip sat: LIVE
+            VIDEO only once a stream has produced a frame, LIVE STILL with
+            the frame's age once a snapshot has. Nothing before the first
+            frame — the LINKING overlay covers the tile until then. */}
+        {badge && (
+          <div className="pointer-events-none absolute left-1.5 top-1.5">
+            <FeedBadgeView badge={badge} frameAt={frameAt} />
+          </div>
+        )}
 
         {/* Hover only: the tile is already a button, this says what it opens. */}
         <div

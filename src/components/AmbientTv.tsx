@@ -148,7 +148,9 @@ export default function AmbientTv({ cameras, onExit }: AmbientTvProps) {
           /* Keyed by camera id: a new place mounts a fresh player rather
              than re-pointing the old one mid-fade. */
           <div key={String(current.id)} className="h-full w-full">
-            <CameraTileMedia cam={current} variant="ambient" />
+            {/* No badge here: Ambient is a lean-back screensaver, and a trust
+                mark over the picture adds nothing to it. */}
+            <CameraTileMedia cam={current} variant="ambient" showBadge={false} />
           </div>
         )}
       </div>

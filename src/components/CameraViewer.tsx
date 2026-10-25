@@ -6,7 +6,9 @@ import { X, ExternalLink, RefreshCw, MapPin, Camera, CameraOff, Maximize2, PlayC
 import Hls from 'hls.js';
 import { isHostedOffPlatform, liveFeedAtSource, localEmbed, needsResolution, offPlatformView } from '@/lib/camera-feed';
 import { clearLook, registerVideo } from '@/lib/vision/store';
+import { clearStreamDead, deriveFeedBadge, isStreamDead, markStreamDead, type BadgeMediaKind } from '@/lib/feed-badge';
 import CameraVision, { VisionReport } from './CameraVision';
+import FeedBadgeView from './FeedBadge';
 
 interface CameraViewerProps {
   camera: any | null;
@@ -23,7 +25,17 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
   /* Which camera degraded to its snapshot. Keyed by id, so a new camera
      starts clean by construction — no reset effect needed. */
   const [degradedFor, setDegradedFor] = useState<string | null>(null);
-  const degraded = Boolean(camera && degradedFor === camera.id);
+  /* First frame decoded (video) and when the frame on screen arrived
+     (snapshot) — keyed the same way, so a new camera starts clean too. */
+  const [videoReadyFor, setVideoReadyFor] = useState<string | null>(null);
+  const [frameAtFor, setFrameAtFor] = useState<{ id: string; at: number } | null>(null);
+  /* A stream that died on another surface this session starts degraded:
+     the viewer opens on the snapshot, wearing STILL, instead of
+     re-attempting a stream that just failed. */
+  const registryDead = camera ? isStreamDead(camera.id) : false;
+  const degraded = Boolean(camera && (degradedFor === camera.id || (registryDead && camera.feed_url)));
+  const videoReady = Boolean(camera && videoReadyFor === camera.id);
+  const frameAt = camera && frameAtFor && frameAtFor.id === camera.id ? frameAtFor.at : null;
   const [retryCount, setRetryCount] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -91,6 +103,17 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
   const view = offPlatformView({ hostedOffPlatform, resolving, resolvedEmbed, offline });
   const externalOnly = view !== 'inline';
 
+  /* The honest badge: LIVE VIDEO only while a stream is actually playing,
+     LIVE STILL with the frame's age otherwise. A snapshot camera whose live
+     video lives at the operator's page (watchLiveUrl) still wears STILL —
+     the picture on screen here is a snapshot, and the WATCH LIVE button
+     is what says the video exists elsewhere. */
+  const viewerBadge = !camera ? null : deriveFeedBadge({
+    mediaKind: (resolvedEmbed ? 'iframe' : streamType) as BadgeMediaKind,
+    state: degraded ? 'degraded' : (videoReady || frameAt !== null) ? 'playing' : 'not-ready',
+    hasSnapshot: Boolean(camera.feed_url),
+  });
+
   useEffect(() => {
     if (!camera) return;
     setLoading(true);
@@ -122,7 +145,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
           /* A dead stream degrades to the snapshot when one exists — a stale
              Caltrans stream name still shows a picture. Only a camera with
              nothing to fall back to gets the FEED UNAVAILABLE card. */
-          if (data.fatal) { if (camera.feed_url) setDegradedFor(camera.id); else setError(true); }
+          if (data.fatal) { markStreamDead(camera.id); if (camera.feed_url) setDegradedFor(camera.id); else setError(true); }
         });
       } else if (videoRef.current?.canPlayType('application/vnd.apple.mpegurl')) {
         videoRef.current.src = camera.stream_url;
@@ -319,7 +342,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                   <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center mb-2 mx-auto"><Camera className="w-4 h-4 text-red-400" /></div>
                   <span className="text-[10px] font-mono text-red-400 tracking-widest block mb-1">FEED UNAVAILABLE</span>
                   <span className="text-[9px] font-mono text-[var(--text-muted)]">Camera may be offline or restricted</span>
-                  <button onClick={() => { setError(false); setDegradedFor(null); setRetryCount(c => c + 1); }} className="block mx-auto mt-3 px-3 py-1 text-[9px] font-mono text-[#7E57C2] border border-[#7E57C2]/30 rounded hover:bg-[#7E57C2]/10 transition-colors tracking-wider">
+                  <button onClick={() => { setError(false); setDegradedFor(null); if (camera) clearStreamDead(camera.id); setRetryCount(c => c + 1); }} className="block mx-auto mt-3 px-3 py-1 text-[9px] font-mono text-[#7E57C2] border border-[#7E57C2]/30 rounded hover:bg-[#7E57C2]/10 transition-colors tracking-wider">
                     RETRY
                   </button>
                 </div>
@@ -331,15 +354,16 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                 autoPlay
                 muted
                 playsInline
-                onError={() => { if (camera?.feed_url) setDegradedFor(camera.id); else setError(true); }}
+                onLoadedData={() => camera && setVideoReadyFor(camera.id)}
+                onError={() => { if (camera) markStreamDead(camera.id); if (camera?.feed_url) setDegradedFor(camera.id); else setError(true); }}
               />
             ) : streamType === 'mjpeg' && camera.stream_url ? (
               <img
                 src={camera.stream_url}
                 alt={camera.name}
                 className={`w-full h-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
-                onLoad={() => setLoading(false)}
-                onError={() => { setLoading(false); setError(true); }}
+                onLoad={() => { setLoading(false); if (camera) setVideoReadyFor(camera.id); }}
+                onError={() => { if (camera?.feed_url) { markStreamDead(camera.id); setDegradedFor(camera.id); } else { setLoading(false); setError(true); } }}
               />
             ) : streamType === 'mp4' && camera.stream_url ? (
               <video
@@ -349,6 +373,8 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                 muted
                 playsInline
                 loop
+                onLoadedData={() => camera && setVideoReadyFor(camera.id)}
+                onError={() => { if (camera?.feed_url) { markStreamDead(camera.id); setDegradedFor(camera.id); } else setError(true); }}
               />
             ) : streamType === 'iframe' && streamUrl ? (
               <iframe
@@ -356,13 +382,14 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                 className="w-full h-full border-0"
                 allow="autoplay; fullscreen"
                 allowFullScreen
+                onLoad={() => camera && setVideoReadyFor(camera.id)}
               />
             ) : imageUrl ? (
               <img
                 src={imageUrl}
                 alt={camera.name}
                 className={`w-full h-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
-                onLoad={() => setLoading(false)}
+                onLoad={() => { setLoading(false); if (camera) setFrameAtFor({ id: camera.id, at: Date.now() }); }}
                 onError={() => { setLoading(false); setError(true); }}
               />
             ) : null}
@@ -370,13 +397,14 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
             {/* Built-in analysis: counted on the reader's device, and what OI Assist sees. */}
             <CameraVision camera={camera} fit={fullscreen ? 'contain' : 'cover'} ready={!loading && !error && !externalOnly} />
 
-            {/* Live indicator */}
-            {!error && !loading && !externalOnly && (
-              <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/80 border border-[var(--gold-primary)]/50 px-2 py-1 shadow-[0_0_10px_rgba(0,0,0,0.8)]">
-                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_#ef4444]" />
-                <span className="text-[9px] font-mono text-white tracking-[0.2em]">
-                  {watchLiveUrl ? 'SNAPSHOT' : streamType === 'jpg' ? 'LIVE SAT-LINK' : 'LIVE FEED'}
-                </span>
+            {/* The honest badge, in place of the old indicator — which called
+                every snapshot 'LIVE SAT-LINK' and every stream 'LIVE FEED'
+                whether it was playing or not. LIVE VIDEO only once a stream
+                has produced a frame; LIVE STILL with the frame's age once
+                a snapshot has. */}
+            {viewerBadge && !error && view === 'inline' && (
+              <div className="absolute left-3 top-3 z-30">
+                <FeedBadgeView badge={viewerBadge} frameAt={frameAt} size="md" />
               </div>
             )}
 
