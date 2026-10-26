@@ -5,6 +5,7 @@ import { CameraOff, PauseCircle } from 'lucide-react';
 import { freshen, refreshInterval } from '@/lib/camera-preview';
 import { deriveFeedBadge, isStreamDead, markStreamDead } from '@/lib/feed-badge';
 import { usePlaceholder } from '@/lib/placeholder-check';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 import FeedBadgeView from './FeedBadge';
 import { wallMedia, type WallCamera, type WallMediaKind } from '@/lib/theater-wall';
 import './CameraTileMedia.css';
@@ -91,7 +92,7 @@ function SnapshotMedia({ url, kind, name, onFail, onFrame, imgClassName = FIT, c
   if (!crossfade) {
     return (
       /* eslint-disable-next-line @next/next/no-img-element -- remote camera frames, no loader */
-      <img src={front} alt={name} className={imgClassName} onLoad={onFrame} onError={onFail} draggable={false} />
+      <img src={front} alt={name} className={`${imgClassName} ${LOOK_MEDIA_CLASS}`} onLoad={onFrame} onError={onFail} draggable={false} />
     );
   }
 
@@ -99,14 +100,14 @@ function SnapshotMedia({ url, kind, name, onFail, onFrame, imgClassName = FIT, c
     <div className="relative h-full w-full overflow-hidden">
       <div className={`absolute inset-0 ${kenBurns ? 'ambient-kenburns' : ''}`}>
         {/* eslint-disable-next-line @next/next/no-img-element -- remote camera frames, no loader */}
-        <img src={front} alt={name} className={`${imgClassName} absolute inset-0`} onLoad={onFrame} onError={onFail} draggable={false} />
+        <img src={front} alt={name} className={`${imgClassName} ${LOOK_MEDIA_CLASS} absolute inset-0`} onLoad={onFrame} onError={onFail} draggable={false} />
         {back && (
           /* eslint-disable-next-line @next/next/no-img-element -- remote camera frames, no loader */
           <img
             src={back}
             alt=""
             aria-hidden
-            className={`${imgClassName} absolute inset-0 transition-opacity ease-in-out`}
+            className={`${imgClassName} ${LOOK_MEDIA_CLASS} absolute inset-0 transition-opacity ease-in-out`}
             style={{ opacity: backIn ? 1 : 0, transitionDuration: `${SNAP_FADE_MS}ms` }}
             onLoad={() => { setBackIn(true); onFrame?.(); }}
             /* A frame that fails to arrive is simply skipped — the one on
@@ -178,7 +179,7 @@ function VideoMedia({ url, kind, onFail, onReady, fitClass = FIT }: {
     return () => { cancelled = true; hls?.destroy(); };
   }, [kind, url, cacheBust, onFail]);
 
-  return <video ref={ref} className={fitClass} muted playsInline loop autoPlay preload="auto" onLoadedData={onReady} onError={onFail} />;
+  return <video ref={ref} className={`${fitClass} ${LOOK_MEDIA_CLASS}`} muted playsInline loop autoPlay preload="auto" onLoadedData={onReady} onError={onFail} />;
 }
 
 function Still({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
@@ -312,7 +313,7 @@ export default function CameraTileMedia({ cam, playVideo = true, variant = 'tile
       <iframe
         src={media.url}
         title={name}
-        className="h-full w-full border-0"
+        className={`h-full w-full border-0 ${LOOK_MEDIA_CLASS}`}
         allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
         allowFullScreen
         onLoad={() => setReady(true)}

@@ -20,6 +20,7 @@ import {
   type StyleSettings,
 } from '@/lib/style-tokens';
 import StyleStudioStage, { StyleStudioExample, type ControlKey } from './StyleStudioStage';
+import { LOOKS, applyLook, readActiveLook, saveLook, type SensorLookId } from '@/lib/sensor-looks';
 
 /**
  * Style Studio — the panel. All token maths lives in `@/lib/style-tokens`;
@@ -195,6 +196,11 @@ function StyleStudio({ onClose, isMobile }: { onClose: () => void; isMobile?: bo
      `pointed` is the control in hand. */
   const [full, setFull] = useState(false);
   const [pointed, setPointed] = useState<ControlKey | null>(null);
+  /* The active sensor look. Deliberately NOT part of StyleSettings: a look
+     is a treatment over the theme, and folding it into the settings would
+     make the studio's save/reset machinery own it — the one thing the
+     looks' design forbids. It lives in lib/sensor-looks, under its own key. */
+  const [look, setLook] = useState<SensorLookId | null>(null);
   const initialised = useRef(false);
   /**
    * Until the user actually changes something there is nothing to override.
@@ -210,6 +216,7 @@ function StyleStudio({ onClose, isMobile }: { onClose: () => void; isMobile?: bo
     const saved = loadSavedSettings();
     if (saved) dirty.current = true;
     setS(saved ?? readTheme());
+    setLook(readActiveLook());
   }, []);
 
   useEffect(() => {
@@ -255,6 +262,12 @@ function StyleStudio({ onClose, isMobile }: { onClose: () => void; isMobile?: bo
   const setBg = useCallback((bg: string) => {
     edit({ bg, bgPrimary: shade(bg, 0.03), bgSecondary: shade(bg, 0.07), bgTertiary: shade(bg, 0.12) });
   }, [edit]);
+
+  const chooseLook = useCallback((id: SensorLookId | null) => {
+    applyLook(id);
+    saveLook(id);
+    setLook(id);
+  }, []);
 
   const reset = () => {
     dirty.current = false;
@@ -373,6 +386,43 @@ function StyleStudio({ onClose, isMobile }: { onClose: () => void; isMobile?: bo
               </button>
             ))}
           </div>
+        </Section>
+
+        <Section title="Sensor looks">
+          <div className="grid grid-cols-3 gap-1 pt-1">
+            <button
+              onClick={() => chooseLook(null)}
+              aria-pressed={look === null}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border transition-colors ${
+                look === null
+                  ? 'border-[var(--border-active)] bg-[var(--gold-primary)]/15'
+                  : 'border-white/10 hover:border-[var(--border-active)] hover:bg-white/5'
+              }`}
+            >
+              <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/25" />
+              <span className={`text-[9px] font-mono tracking-wider ${look === null ? 'text-[var(--gold-light)]' : 'text-white/50'}`}>OFF</span>
+            </button>
+            {LOOKS.map(l => (
+              <button
+                key={l.id}
+                onClick={() => chooseLook(l.id)}
+                aria-pressed={look === l.id}
+                title={l.blurb}
+                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border transition-colors ${
+                  look === l.id
+                    ? 'border-[var(--border-active)] bg-[var(--gold-primary)]/15'
+                    : 'border-white/10 hover:border-[var(--border-active)] hover:bg-white/5'
+                }`}
+              >
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: l.swatch }} />
+                <span className={`text-[9px] font-mono tracking-wider ${look === l.id ? 'text-[var(--gold-light)]' : 'text-white/50'}`}>{l.label}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[8px] font-mono leading-snug text-white/20 pt-1.5">
+            A treatment over the map and the live pictures — not a theme. Your theme stays
+            untouched underneath, and OFF restores it exactly.
+          </p>
         </Section>
 
         <Section title="Accent">

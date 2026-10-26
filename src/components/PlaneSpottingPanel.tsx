@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crosshair, ExternalLink, Headphones, Plane, X } from 'lucide-react';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 import {
   SPOTTING_AIRPORTS, liveAtcUrl, youtubeChannelUrl, youtubeEmbedUrl, youtubeWatchUrl,
   type SpottingAirport,
@@ -100,7 +101,7 @@ export default function PlaneSpottingPanel({ onClose, onFlyTo }: PlaneSpottingPa
               ref={el => { if (el?.contentWindow) iframeOwners.current.set(el.contentWindow as object, selected.icao); }}
               src={youtubeEmbedUrl(selected.videoId)}
               title={`${selected.airport} live camera — ${selected.operator}`}
-              className="h-full w-full border-0"
+              className={`h-full w-full border-0 ${LOOK_MEDIA_CLASS}`}
               allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
               allowFullScreen
             />

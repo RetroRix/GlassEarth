@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, Radio, Maximize2, X } from 'lucide-react';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 
 /**
  * OSIRIS — LIVE FROM SPACE
@@ -119,7 +120,7 @@ export default function SpaceCam() {
           title={`ISS live — ${active.label}`}
           allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
-          className="absolute inset-0 w-full h-full border-0"
+          className={`absolute inset-0 w-full h-full border-0 ${LOOK_MEDIA_CLASS}`}
         />
         {/* At 320px wide YouTube will only ever send a low-resolution rendition,
             so the panel says so rather than looking broken. */}
@@ -207,7 +208,7 @@ export default function SpaceCam() {
                 title={`ISS live expanded — ${active.label}`}
                 allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                 allowFullScreen
-                className="absolute inset-0 w-full h-full border-0"
+                className={`absolute inset-0 w-full h-full border-0 ${LOOK_MEDIA_CLASS}`}
               />
             </div>
 

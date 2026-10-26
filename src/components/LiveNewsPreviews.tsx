@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { layoutTile, tileHeight, tilesOverlap, type TileGeometry } from '@/lib/map-tile-layout';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 import type { Map as MlMap } from 'maplibre-gl';
 
 /**
@@ -165,7 +166,7 @@ function Tile({ feed, onOpen, onFail }: {
           ref={ref}
           src={feed.embed}
           title={feed.name}
-          className="h-full w-full"
+          className={`h-full w-full ${LOOK_MEDIA_CLASS}`}
           style={{ border: 0 }}
           allow="autoplay; encrypted-media; picture-in-picture"
           referrerPolicy="strict-origin-when-cross-origin"

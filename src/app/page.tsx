@@ -28,6 +28,7 @@ import type { LiveDetection } from '@/lib/malware-intel';
 import ScaleBar from '@/components/ScaleBar';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { applySettings, loadSavedSettings } from '@/lib/style-tokens';
+import { applyLook, loadSavedLook } from '@/lib/sensor-looks';
 import SharePanel from '@/components/SharePanel';
 import ViewPresets from '@/components/ViewPresets';
 import KeyboardShortcuts from '@/components/KeyboardShortcuts';
@@ -627,10 +628,14 @@ export default function Dashboard() {
   );
 
   /* Style Studio overrides are inline on <body>, so they survive the theme
-     swap above and only need reapplying once per load. */
+     swap above and only need reapplying once per load. The saved sensor
+     look rides along in the same pass — its own key, its own artefacts,
+     applied over whatever theme won. */
   useEffect(() => {
     const saved = loadSavedSettings();
     if (saved) applySettings(saved);
+    const look = loadSavedLook();
+    if (look) applyLook(look);
   }, []);
 
   const isMobile = useIsMobile();

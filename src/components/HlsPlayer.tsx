@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 
 /**
  * Glass Earth — one HLS stream in a <video>, the stations edition.
@@ -68,7 +69,7 @@ export default function HlsPlayer({ url, muted = false, autoPlay = true, classNa
   return (
     <video
       ref={ref}
-      className={className ?? 'h-full w-full bg-black'}
+      className={`${className ?? 'h-full w-full bg-black'} ${LOOK_MEDIA_CLASS}`}
       muted={muted}
       playsInline
       autoPlay={autoPlay}

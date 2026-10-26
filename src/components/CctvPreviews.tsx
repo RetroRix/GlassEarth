@@ -5,6 +5,7 @@ import { Maximize2 } from 'lucide-react';
 import { freshen, previewMedia, refreshInterval, snapshotFallbackMedia, VIDEO_KINDS, type PreviewKind } from '@/lib/camera-preview';
 import { deriveFeedBadge, isStreamDead, markStreamDead } from '@/lib/feed-badge';
 import { usePlaceholder } from '@/lib/placeholder-check';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 import FeedBadgeView from './FeedBadge';
 import { layoutTile, tileHeight, tilesOverlap, type TileGeometry } from '@/lib/map-tile-layout';
 import type { Map as MlMap } from 'maplibre-gl';
@@ -107,7 +108,7 @@ function ImageMedia({ cam: camera, onReady, onFail }: MediaProps) {
       alt={camera.name}
       width={TILE_W}
       height={IMG_H}
-      className={FIT}
+      className={`${FIT} ${LOOK_MEDIA_CLASS}`}
       onLoad={onReady}
       onError={onFail}
       draggable={false}
@@ -180,7 +181,7 @@ function VideoMedia({ cam: camera, onReady, onFail }: MediaProps) {
   return (
     <video
       ref={ref}
-      className={FIT}
+      className={`${FIT} ${LOOK_MEDIA_CLASS}`}
       muted
       playsInline
       loop

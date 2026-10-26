@@ -8,6 +8,7 @@ import { isHostedOffPlatform, liveFeedAtSource, localEmbed, needsResolution, off
 import { clearLook, registerVideo } from '@/lib/vision/store';
 import { clearStreamDead, deriveFeedBadge, isStreamDead, markStreamDead, type BadgeMediaKind } from '@/lib/feed-badge';
 import { usePlaceholder } from '@/lib/placeholder-check';
+import { LOOK_MEDIA_CLASS } from '@/lib/sensor-looks';
 import CameraVision, { VisionReport } from './CameraVision';
 import FeedBadgeView from './FeedBadge';
 
@@ -356,7 +357,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
             ) : streamType === 'hls' ? (
               <video
                 ref={videoRef}
-                className={`w-full h-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
+                className={`w-full h-full ${LOOK_MEDIA_CLASS} ${fullscreen ? 'object-contain' : 'object-cover'}`}
                 autoPlay
                 muted
                 playsInline
@@ -367,14 +368,14 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
               <img
                 src={camera.stream_url}
                 alt={camera.name}
-                className={`w-full h-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
+                className={`w-full h-full ${LOOK_MEDIA_CLASS} ${fullscreen ? 'object-contain' : 'object-cover'}`}
                 onLoad={() => { setLoading(false); if (camera) setVideoReadyFor(camera.id); }}
                 onError={() => { if (camera?.feed_url) { markStreamDead(camera.id); setDegradedFor(camera.id); } else { setLoading(false); setError(true); } }}
               />
             ) : streamType === 'mp4' && camera.stream_url ? (
               <video
                 src={camera.stream_url}
-                className={`w-full h-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
+                className={`w-full h-full ${LOOK_MEDIA_CLASS} ${fullscreen ? 'object-contain' : 'object-cover'}`}
                 autoPlay
                 muted
                 playsInline
@@ -385,7 +386,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
             ) : streamType === 'iframe' && streamUrl ? (
               <iframe
                 src={streamUrl}
-                className="w-full h-full border-0"
+                className={`w-full h-full border-0 ${LOOK_MEDIA_CLASS}`}
                 allow="autoplay; fullscreen"
                 allowFullScreen
                 onLoad={() => camera && setVideoReadyFor(camera.id)}
@@ -394,7 +395,7 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
               <img
                 src={imageUrl}
                 alt={camera.name}
-                className={`w-full h-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
+                className={`w-full h-full ${LOOK_MEDIA_CLASS} ${fullscreen ? 'object-contain' : 'object-cover'}`}
                 onLoad={() => { setLoading(false); if (camera) setFrameAtFor({ id: camera.id, at: Date.now() }); }}
                 onError={() => { setLoading(false); setError(true); }}
               />
