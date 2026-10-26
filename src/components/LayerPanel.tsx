@@ -5,9 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plane, Satellite, Sun, Moon, AlertTriangle, Camera,
   CloudLightning, CloudSun, Ship, Network, Database, Ghost,
-  Flame, Tv, Radio, Mountain, Anchor, Megaphone, SlidersHorizontal, Bus
+  Flame, Tv, Radio, Mountain, Anchor, Megaphone, SlidersHorizontal, Bus,
+  Pin, PinOff
 } from 'lucide-react';
 import StyleStudio from './StyleStudio';
+import BarEdgeHandle from './BarEdgeHandle';
+import { useHideableBar } from '@/lib/hideable-bars';
 import { TERRAIN_MIN_ZOOM, type TerrainStatus } from '@/lib/map-terrain';
 
 interface LayerPanelProps {
@@ -26,6 +29,9 @@ interface LayerPanelProps {
   on3DModeSelected?: () => void;
   /** False while the splash is up; the rail slides in when it turns true. */
   revealed?: boolean;
+  /** A cockpit ride owns the screen: the rail auto-hides for the ride
+   *  (hover / edge-tap still reveals it temporarily). */
+  rideActive?: boolean;
   /** A layer's live state in a line, shown under its name in place of its description. */
   liveStatus?: Record<string, string>;
 }
@@ -217,7 +223,7 @@ function SubLayerStem() {
   );
 }
 
-function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus }: LayerPanelProps) {
+function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false }: LayerPanelProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   /**
    * A pinned group stays open when the pointer leaves. Hover-only flyouts are
@@ -226,6 +232,26 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
    */
   const [pinnedGroup, setPinnedGroup] = useState<string | null>(null);
   const [studioOpen, setStudioOpen] = useState(false);
+
+  /* Hideable rail (desktop only; the mobile layout has no side bar). A
+     flyout pinned open from the rail, or the Style Studio it launched,
+     holds the rail on screen — it never hides out from under its own
+     panel. Destructured: the compiler tracks each binding on its own. */
+  const {
+    pinned: barPinned,
+    visible: barVisibleNow,
+    tapStuck: barTapStuck,
+    rootRef: barRootRef,
+    togglePinned: barTogglePinned,
+    noteEnter: barNoteEnter,
+    noteLeave: barNoteLeave,
+    noteFocus: barNoteFocus,
+    noteBlur: barNoteBlur,
+    toggleTap: barToggleTap,
+  } = useHideableBar('left', {
+    panelOpen: pinnedGroup !== null || studioOpen,
+    riding: rideActive,
+  });
 
   useEffect(() => {
     if (!pinnedGroup) return;
@@ -389,11 +415,32 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
 
   /* ── DESKTOP ── */
   return (
+    <div ref={barRootRef} className="absolute top-0 left-0 h-full w-[64px] z-50 pointer-events-none">
+      {/* The rail and its flyouts ride this slider: tucked off the left
+          edge when hidden, flush when shown. visibility flips with the
+          slide so a hidden rail leaves the tab order too. */}
+      <div
+        onMouseEnter={barNoteEnter}
+        onMouseLeave={barNoteLeave}
+        onFocus={barNoteFocus}
+        onBlur={barNoteBlur}
+        className="absolute top-0 left-0 h-full pointer-events-none"
+        style={{
+          /* 'none', not translateX(0), while shown: any transform at all
+             becomes the containing block for fixed-position descendants. */
+          transform: barVisibleNow ? 'none' : 'translateX(-110%)',
+          opacity: barVisibleNow ? 1 : 0,
+          visibility: barVisibleNow ? 'visible' : 'hidden',
+          transition: barVisibleNow
+            ? 'transform 300ms cubic-bezier(0.22,1,0.36,1), opacity 220ms ease, visibility 0s'
+            : 'transform 300ms cubic-bezier(0.22,1,0.36,1), opacity 220ms ease, visibility 0s 300ms',
+        }}
+      >
     <motion.div
       initial={{ x: -60, opacity: 0 }}
       animate={revealed ? { x: 0, opacity: 1 } : { x: -60, opacity: 0 }}
       transition={{ type: 'spring', damping: 30, stiffness: 200, delay: 0.25 }}
-      className="lp-darkscope absolute top-0 left-0 h-full w-[48px] flex flex-col items-center pt-24 pb-6 z-50 pointer-events-auto"
+      className="lp-darkscope relative h-full w-[48px] flex flex-col items-center pt-24 pb-6 pointer-events-auto"
       style={{
         background: 'var(--lp-rail-bg)',
         backdropFilter: 'blur(24px) saturate(1.2)',
@@ -590,7 +637,52 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
           />
         </button>
       )}
+
+      {/* Pin toggle — lock the rail on screen, or hand it to auto-hide.
+          The choice is remembered per visitor (lib/hideable-bars). */}
+      <button
+        onClick={barTogglePinned}
+        aria-pressed={barPinned}
+        className="w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-500 cursor-pointer"
+        style={{ background: barPinned ? 'var(--hover-accent)' : 'transparent' }}
+        title={barPinned ? 'Rail pinned — tap to let it tuck away' : 'Rail auto-hides — tap to pin it on screen'}
+      >
+        {barPinned ? (
+          <Pin
+            className="transition-all duration-500"
+            style={{
+              width: 15,
+              height: 15,
+              color: 'var(--gold-primary)',
+              filter: 'drop-shadow(0 0 6px var(--gold-glow))',
+            }}
+          />
+        ) : (
+          <PinOff
+            className="transition-all duration-500"
+            style={{ width: 15, height: 15, color: 'rgba(255,255,255,0.15)' }}
+          />
+        )}
+      </button>
     </motion.div>
+      </div>
+
+      {/* Edge zone + handle, only while the rail is tucked away: hovering
+          the screen edge reveals the rail; on touch the handle is the tap
+          target. A tap-stuck rail keeps a hide-mode handle instead. */}
+      {!barVisibleNow && (
+        <div
+          className="absolute left-0 top-0 h-full w-[16px] pointer-events-auto"
+          onMouseEnter={barNoteEnter}
+          onMouseLeave={barNoteLeave}
+        >
+          <BarEdgeHandle side="left" mode="show" label="layers toolbar" onTap={barToggleTap} />
+        </div>
+      )}
+      {barVisibleNow && barTapStuck && (
+        <BarEdgeHandle side="left" mode="hide" label="layers toolbar" onTap={barToggleTap} />
+      )}
+    </div>
   );
 }
 

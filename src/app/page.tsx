@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useReducer, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home, ArrowLeft } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home, ArrowLeft, Pin, PinOff } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
@@ -31,6 +31,8 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { applySettings, loadSavedSettings } from '@/lib/style-tokens';
 import { applyLook, loadSavedLook } from '@/lib/sensor-looks';
 import SharePanel from '@/components/SharePanel';
+import BarEdgeHandle from '@/components/BarEdgeHandle';
+import { useHideableBar } from '@/lib/hideable-bars';
 import ViewPresets from '@/components/ViewPresets';
 import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
@@ -544,6 +546,31 @@ export default function Dashboard() {
     window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
   }, [showOi]);
+  /* Whether the strip's Share popover is open — it keeps its state inside
+     SharePanel, which reports it through onOpenChange. */
+  const [shareOpen, setShareOpen] = useState(false);
+  /* Hideable right tool strip (lib/hideable-bars): any panel the strip
+     opened holds it on screen; a cockpit ride puts it away unless it is
+     being hovered/tapped or a panel is open. */
+  const {
+    pinned: rightBarPinned,
+    visible: rightBarVisible,
+    tapStuck: rightBarTapStuck,
+    rootRef: rightBarRootRef,
+    togglePinned: rightBarTogglePinned,
+    noteEnter: rightBarNoteEnter,
+    noteLeave: rightBarNoteLeave,
+    noteFocus: rightBarNoteFocus,
+    noteBlur: rightBarNoteBlur,
+    toggleTap: rightBarToggleTap,
+  } = useHideableBar('right', {
+    riding: cockpitState.status === 'riding',
+    panelOpen:
+      showSpaceCam || showWall || showTv || showTvWall || showStations ||
+      showSpotting || showMarkets || showAlerts || showOi || showDrawing ||
+      showDirections || showDesktopSearch || showArcGIS || showRemote ||
+      shareOpen,
+  });
   /** What is selected on the globe or in the panel: a point's key, or "link:<id>" for an arc. */
   const [oiSelected, setOiSelected] = useState<string | null>(null);
   const [oiHover, setOiHover] = useState<OiHover | null>(null);
@@ -2317,12 +2344,44 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} /></div>}
+      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} /></div>}
 
 
 
-      {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ── */}
-      {!isMobile && <motion.div data-hud initial={{ opacity: 0, x: 12 }} animate={revealed ? { opacity: 1, x: 0 } : { opacity: 0, x: 12 }} transition={hudIn(0.3)} className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
+      {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ──
+          Hideable (lib/hideable-bars): the strip rides a slider inside an
+          edge shell; tucked off the right edge when hidden, with an edge
+          zone + handle standing in for it. */}
+      {!isMobile && (
+      <div ref={rightBarRootRef} data-hud className="absolute inset-y-0 right-0 w-[72px] z-[250] pointer-events-none">
+        <div
+          onMouseEnter={rightBarNoteEnter}
+          onMouseLeave={rightBarNoteLeave}
+          onFocus={rightBarNoteFocus}
+          onBlur={rightBarNoteBlur}
+          className="absolute inset-y-0 right-0 w-[72px] pointer-events-none"
+          style={{
+            /* 'none', not translateX(0), while shown: any transform at all
+               becomes the containing block for fixed-position descendants
+               (the Markets panel's expanded view is one). */
+            transform: rightBarVisible ? 'none' : 'translateX(110%)',
+            opacity: rightBarVisible ? 1 : 0,
+            visibility: rightBarVisible ? 'visible' : 'hidden',
+            transition: rightBarVisible
+              ? 'transform 300ms cubic-bezier(0.22,1,0.36,1), opacity 220ms ease, visibility 0s'
+              : 'transform 300ms cubic-bezier(0.22,1,0.36,1), opacity 220ms ease, visibility 0s 300ms',
+          }}
+        >
+      <motion.div initial={{ opacity: 0, x: 12 }} animate={revealed ? { opacity: 1, x: 0 } : { opacity: 0, x: 12 }} transition={hudIn(0.3)} className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
+        <div className="relative group">
+          <button onClick={rightBarTogglePinned} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${rightBarPinned ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title={rightBarPinned ? 'Tool strip pinned — tap to let it tuck away' : 'Tool strip auto-hides — tap to pin it on screen'} aria-label="Toggle tool strip pin" aria-pressed={rightBarPinned}>
+            {rightBarPinned
+              ? <Pin className="w-4 h-4 text-[var(--gold-primary)]" />
+              : <PinOff className="w-4 h-4 text-white/60" />}
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">{rightBarPinned ? 'PINNED' : 'AUTO-HIDE'}</span>
+        </div>
+
         <div className="relative group">
           <button onClick={() => setOsirisTheme(osirisTheme === 'day' ? 'core' : 'day')} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${osirisTheme === 'day' ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Day / Night — switch the app between the light day theme and the dark theme" aria-label="Toggle day and night mode" aria-pressed={osirisTheme === 'day'}>
             {osirisTheme === 'day'
@@ -2516,7 +2575,7 @@ export default function Dashboard() {
         </div>
 
         <div className="relative">
-          <SharePanel view={shareView} activeLayers={activeLayers} cameraId={shareCameraId} cameraName={shareCameraName} withShortcut={false} />
+          <SharePanel view={shareView} activeLayers={activeLayers} cameraId={shareCameraId} cameraName={shareCameraName} withShortcut={false} onOpenChange={setShareOpen} />
         </div>
 
         {/* Separator */}
@@ -2586,7 +2645,26 @@ export default function Dashboard() {
         </div>
 
 
-      </motion.div>}
+      </motion.div>
+        </div>
+
+        {/* Edge zone + handle while the strip is tucked away; the handle
+            sits low on the right edge, clear of the cockpit ride's NEARBY
+            chip at centre. A tap-stuck strip keeps a hide-mode handle. */}
+        {!rightBarVisible && (
+          <div
+            className="absolute right-0 top-0 h-full w-[16px] pointer-events-auto"
+            onMouseEnter={rightBarNoteEnter}
+            onMouseLeave={rightBarNoteLeave}
+          >
+            <BarEdgeHandle side="right" mode="show" label="tool strip" low onTap={rightBarToggleTap} />
+          </div>
+        )}
+        {rightBarVisible && rightBarTapStuck && (
+          <BarEdgeHandle side="right" mode="hide" label="tool strip" low onTap={rightBarToggleTap} />
+        )}
+      </div>
+      )}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
       <AnimatePresence>

@@ -17,11 +17,18 @@ interface SharePanelProps {
    *  key — on desktop the page's [S] is Search, so the strip instance
    *  passes false rather than fighting it. */
   withShortcut?: boolean;
+  /** Reports the popover opening/closing, for chrome that must not hide
+   *  while the popover is up (the hideable tool strip). */
+  onOpenChange?: (open: boolean) => void;
 }
 
-export default function SharePanel({ view, activeLayers, cameraId, cameraName, withShortcut = true }: SharePanelProps) {
+export default function SharePanel({ view, activeLayers, cameraId, cameraName, withShortcut = true, onOpenChange }: SharePanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
 
   const generateShareUrl = useCallback(() => {
     // Encode active layers as compact string
