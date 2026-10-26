@@ -4,6 +4,7 @@ import { buildGeometry, closeRing, drawReducer, initialDrawState, measure, type 
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import { installTerrainTileProtocol } from '@/lib/terrain-tiles';
+import { rehomeLookOverlay } from '@/lib/sensor-looks';
 import { CLOUDS_ATTRIBUTION, CLOUDS_CREDIT, CLOUDS_LAYER, frameTime } from '@/lib/live-clouds';
 import { createCloudLayer } from '@/lib/live-clouds-layer';
 import { WIND_ATTRIBUTION } from '@/lib/wind-layer';
@@ -473,6 +474,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     }
     if (!map) return;
 
+    /* The container is a .maplibregl-map from this moment: if a sensor
+       look with a vignette overlay was applied before the map existed,
+       home the overlay into the map element now (it must live inside the
+       map's box, never over the app's chrome). */
+    rehomeLookOverlay();
     map.on('load', () => {
       mapRef.current = map;
 

@@ -47,6 +47,36 @@
  * Thermal showed nothing at all). The namespaced construction below is
  * proven against a real Chromium: img, canvas-2d and WebGL surfaces all
  * take the ramp (see the fix-round report).
+ *
+ * Two more rules, bought on iOS the same evening (Rick's iPhone, 2026-10-26):
+ *
+ *  - THE OVERLAY LIVES INSIDE THE MAP, NEVER OVER THE VIEWPORT. The first
+ *    version appended the vignette div to <body> as position:fixed at
+ *    z-index 9990. Every piece of chrome in this app lives at z-index 999
+ *    or below (mobile sheet and Style Studio 400, drawers 940, splash 999),
+ *    so the overlay outranked ALL of it. On desktop nobody noticed — the
+ *    vignette is transparent across the middle of the screen, where desktop
+ *    panels sit. The mobile LAYERS & STATS sheet spans the bottom half of a
+ *    phone screen, deep inside the gradient, and its rows crushed to
+ *    black-on-black: the user could not read the menus, could not find OFF,
+ *    and was stuck in the look. The overlay is now homed inside the
+ *    .maplibregl-map element at z-index 2 (body-fixed at z-index 1 only if
+ *    the map element does not exist yet) — beneath every chrome z-index in
+ *    the app by construction, on every engine and every layout. A look must
+ *    never be able to trap its user.
+ *
+ *  - WEBKIT NEVER GETS THE SVG RAMPS. iOS Safari does not apply CSS
+ *    `filter: url("#…")` references — Rick's iPhone showed Thermal as
+ *    completely untreated while desktop Chromium rendered the same build
+ *    correctly (and WebKit's ports disagree with each other about filter
+ *    references, so no port's behaviour can stand in for another's). CSS
+ *    filter *functions*, by contrast, render in every WebKit. So engines in
+ *    the WebKit family (Safari, every browser on iOS, WebKit ports) get
+ *    CSS-chain versions of the two ramp looks — monotone sepia ramps that
+ *    keep the SVG versions' luminance ordering — and Blink/Gecko keep the
+ *    true palette ramps. The choice is made on the user agent's engine
+ *    tokens, and it fails safe: a WebKit that one day grows filter
+ *    references still gets a working look, just the chain one.
  */
 
 export const LOOK_STORAGE_KEY = 'osiris:sensor-look';
@@ -68,6 +98,13 @@ export interface SensorLook {
   swatch: string;
   /** The CSS filter applied to the map canvas and every live picture. */
   filter: string;
+  /**
+   * WebKit-family substitute for `filter`, for the looks whose primary
+   * filter is an SVG reference WebKit cannot be trusted to render. A CSS
+   * filter-function chain with the same character and the same luminance
+   * ordering. Absent on looks that are already plain chains.
+   */
+  cssFilter?: string;
   /** True when `filter` references an SVG filter in LOOK_DEFS. */
   svg: boolean;
   /** Screen-overlay background layers (scanlines, vignette), or null. */
@@ -81,6 +118,10 @@ export const LOOKS: SensorLook[] = [
     blurb: 'The picture through an image intensifier — phosphor green, edges falling off like a tube.',
     swatch: '#3dff6e',
     filter: 'url("#ge-look-nightvision")',
+    /* WebKit chain: grayscale → sepia (a monotone warm ramp) → rotate to
+       green and push saturation. Same phosphor family as the CRT chain,
+       brighter and cleaner — a tube, not a monitor. */
+    cssFilter: 'grayscale(1) sepia(1) hue-rotate(66deg) saturate(3.1) contrast(1.16) brightness(1.06)',
     svg: true,
     /* A tube vignette: the centre stays clear, the edges fall to black-green. */
     overlay: 'radial-gradient(ellipse at center, transparent 52%, rgba(1, 12, 3, 0.55) 100%)',
@@ -91,6 +132,11 @@ export const LOOKS: SensorLook[] = [
     blurb: 'A heat palette laid over brightness — dark is cold, bright is hot, ironbow colours between.',
     swatch: 'linear-gradient(90deg, #1b0033, #a200ff, #ff2a00, #ffb300, #fff6c8)',
     filter: 'url("#ge-look-thermal")',
+    /* WebKit chain: grayscale → sepia → rotate the warm ramp down into the
+       reds and push it hard. Dark stays near-black warm, mid-tones go
+       red-orange, highlights blow out pale — a red-heat palette (a real
+       FLIR family) standing in for ironbow's extra hues. */
+    cssFilter: 'grayscale(1) sepia(1) hue-rotate(-40deg) saturate(3.6) contrast(1.22) brightness(1.05)',
     svg: true,
     overlay: null,
   },
@@ -161,6 +207,48 @@ export const LOOK_DEFS = `<defs>
 </filter>
 </defs>`;
 
+/* ── Engine split ──
+   Which mechanism a look may use is a property of the browser ENGINE, not
+   of the look. 'svg' engines (Blink, Gecko) render CSS filter references
+   to the palette ramps. 'css' engines (the WebKit family) are never handed
+   a url() reference at all — iOS WebKit does not render them (proven on
+   Rick's iPhone, 2026-10-26) — and get filter-function chains instead,
+   which every WebKit renders. Detection reads the engine tokens in the
+   user agent: a WebKit-family UA carries AppleWebKit WITHOUT a Blink
+   token (Chrome/Edge/Opera all carry one, including on desktop; Chrome
+   and Firefox on iOS carry CriOS/FxiOS instead and stay WebKit, which is
+   correct — on iOS they ARE WebKit). */
+
+export type LookEngine = 'svg' | 'css';
+
+const WEBKIT_TOKEN = /AppleWebKit\//;
+const BLINK_TOKEN = /(Chrome|Chromium|Edg|OPR)\//;
+const IOS_BADGE_TOKEN = /(CriOS|FxiOS)\//;
+
+/** The mechanism a user agent's engine may be trusted with. Pure. */
+export function lookEngineForUserAgent(ua: string): LookEngine {
+  if (!WEBKIT_TOKEN.test(ua)) return 'svg';
+  /* CriOS/FxiOS are WebKit wearing another browser's badge on iOS — the
+     engine is WebKit whatever the badge says. */
+  if (IOS_BADGE_TOKEN.test(ua)) return 'css';
+  return BLINK_TOKEN.test(ua) ? 'svg' : 'css';
+}
+
+let cachedEngine: LookEngine | null = null;
+
+/** This browser's engine, detected once. Non-browser contexts get 'svg'. */
+export function detectLookEngine(): LookEngine {
+  if (cachedEngine) return cachedEngine;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  cachedEngine = lookEngineForUserAgent(ua);
+  return cachedEngine;
+}
+
+/** The filter a look actually runs under an engine. */
+export function lookFilter(look: SensorLook, engine: LookEngine): string {
+  return engine === 'css' && look.cssFilter ? look.cssFilter : look.filter;
+}
+
 /**
  * The filter rules for one look, scoped to its own `data-look` value so the
  * attribute alone gates them: strip the attribute and the treatment is off
@@ -169,14 +257,15 @@ export const LOOK_DEFS = `<defs>
  * which is the legibility rule made structural: badges, labels in panels
  * and UI text cannot be filtered because no selector can reach them.
  */
-export function buildLookCss(look: SensorLook): string {
+export function buildLookCss(look: SensorLook, engine: LookEngine = 'svg'): string {
+  const filter = lookFilter(look, engine);
   const at = `body[data-look="${look.id}"]`;
   return `${at} .maplibregl-canvas,
 ${at} .${LOOK_MEDIA_CLASS} {
-  filter: ${look.filter};
+  filter: ${filter};
 }
 ${at} .${LOOK_MEDIA_CLASS}.blur-2xl {
-  filter: blur(40px) ${look.filter};
+  filter: blur(40px) ${filter};
 }`;
 }
 
@@ -194,13 +283,15 @@ export interface LookPlan {
 
 const NO_LOOK: LookPlan = { dataLook: null, css: '', defs: false, overlayCss: null };
 
-export function lookPlan(id: SensorLookId | null): LookPlan {
+export function lookPlan(id: SensorLookId | null, engine: LookEngine = 'svg'): LookPlan {
   const look = id ? LOOKS.find(l => l.id === id) : undefined;
   if (!look) return NO_LOOK;
   return {
     dataLook: look.id,
-    css: buildLookCss(look),
-    defs: look.svg,
+    css: buildLookCss(look, engine),
+    /* The defs only exist for an engine that will actually reference them;
+       under 'css' the ramp looks run their chains and no <svg> is added. */
+    defs: look.svg && engine === 'svg',
     overlayCss: look.overlay,
   };
 }
@@ -254,10 +345,64 @@ function drop(id: string) {
   document.getElementById(id)?.remove();
 }
 
+/** The map element the overlay is homed into (MapLibre's own class). */
+export const LOOK_MAP_SELECTOR = '.maplibregl-map';
+/** Overlay z-index inside the map element: above the canvas, below every
+ *  piece of app chrome (the lowest chrome in the app sits at z-index 100). */
+export const LOOK_OVERLAY_Z_IN_MAP = 2;
+/** Overlay z-index for the no-map-yet fallback: fixed, but still below all
+ *  chrome — the overlay must never outrank a menu, whatever happens. */
+export const LOOK_OVERLAY_Z_FALLBACK = 1;
+
+/**
+ * Put the overlay where it can only ever touch the picture: inside the map
+ * element itself, absolutely positioned over the canvas. Panels, sheets,
+ * drawers and menus are never descendants of the map element, so the
+ * vignette cannot reach them — that is the structural form of "chrome is
+ * never treated". If the map element does not exist yet, fall back to a
+ * body-fixed overlay at a z-index still below all chrome; the next
+ * applyLook re-homes it into the map.
+ */
+function placeOverlay(el: HTMLElement, backgroundImage: string) {
+  const mapEl = (typeof document.querySelector === 'function'
+    ? document.querySelector(LOOK_MAP_SELECTOR)
+    : null) as HTMLElement | null;
+  const parent = mapEl ?? document.body;
+  /* Detach first, then append: appendChild alone would also move the node
+     in a real DOM, but the explicit detach keeps the operation identical
+     everywhere — and re-running it is what re-homes an overlay that was
+     placed before the map element existed. */
+  el.remove();
+  parent.appendChild(el);
+  el.setAttribute(
+    'style',
+    mapEl
+      ? `position:absolute;inset:0;pointer-events:none;z-index:${LOOK_OVERLAY_Z_IN_MAP};background-image:${backgroundImage}`
+      : `position:fixed;inset:0;pointer-events:none;z-index:${LOOK_OVERLAY_Z_FALLBACK};background-image:${backgroundImage}`,
+  );
+}
+
+/** The overlay background of the look currently applied, if any — kept so
+ *  the overlay can be re-homed when the map element appears after the
+ *  boot-time apply (the map is constructed after the page's first effect
+ *  on some boots, and the fallback placement must not become permanent). */
+let activeOverlayCss: string | null = null;
+
+/**
+ * Re-home the overlay into the map element if one has appeared since the
+ * look was applied. Called by the map component once its Map exists; a
+ * no-op when no look with an overlay is active.
+ */
+export function rehomeLookOverlay() {
+  if (typeof document === 'undefined' || !activeOverlayCss) return;
+  const el = document.getElementById(LOOK_OVERLAY_ID) as HTMLElement | null;
+  if (el) placeOverlay(el, activeOverlayCss);
+}
+
 /** Push a look onto the page, or strip every trace of one when passed null. */
-export function applyLook(id: SensorLookId | null) {
+export function applyLook(id: SensorLookId | null, engine: LookEngine = detectLookEngine()) {
   if (typeof document === 'undefined') return;
-  const plan = lookPlan(id);
+  const plan = lookPlan(id, engine);
   const body = document.body;
 
   if (plan.dataLook) body.setAttribute('data-look', plan.dataLook);
@@ -275,14 +420,10 @@ export function applyLook(id: SensorLookId | null) {
     });
   } else drop(LOOK_DEFS_ID);
 
+  activeOverlayCss = plan.overlayCss;
   if (plan.overlayCss) {
-    upsert(LOOK_OVERLAY_ID, 'div', body, el => {
-      el.setAttribute('aria-hidden', 'true');
-      el.setAttribute(
-        'style',
-        `position:fixed;inset:0;pointer-events:none;z-index:9990;background-image:${plan.overlayCss}`,
-      );
-    });
+    const el = upsert(LOOK_OVERLAY_ID, 'div', body, e => { e.setAttribute('aria-hidden', 'true'); });
+    placeOverlay(el, plan.overlayCss);
   } else drop(LOOK_OVERLAY_ID);
 }
 
