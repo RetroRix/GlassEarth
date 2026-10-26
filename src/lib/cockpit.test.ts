@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  COCKPIT_PITCH,
+  COCKPIT_TOP_PADDING_FRACTION,
   COCKPIT_ZOOM,
   CONTACT_RADIUS_KM,
   EXTRAPOLATE_CAP_MS,
@@ -11,6 +13,7 @@ import {
   destinationPoint,
   haversineKm,
   initialBearingDeg,
+  mapPopupsAllowed,
   smoothAngleDeg,
   type CockpitFix,
   type CockpitState,
@@ -230,5 +233,31 @@ describe('cockpitReducer', () => {
   it('keeps the agreed framing constants', () => {
     expect(COCKPIT_ZOOM).toBeGreaterThan(10);
     expect(EXTRAPOLATE_CAP_MS).toBeGreaterThan(0);
+  });
+
+  it('FPV framing: pitched to a horizon, the nose sits at the bottom edge', () => {
+    expect(COCKPIT_PITCH).toBe(76);
+    // MapLibre renders the camera centre at 50% + fraction/2 of the frame
+    // height; the FPV fraction must put the aircraft in the bottom quarter.
+    expect(COCKPIT_TOP_PADDING_FRACTION).toBeGreaterThan(0.5);
+    expect(0.5 + COCKPIT_TOP_PADDING_FRACTION / 2).toBeGreaterThan(0.75);
+  });
+
+  it('the popup entry path engages the follow at once', () => {
+    // The map popup's RIDE button hands the aircraft to the page, which
+    // dispatches ENTER — the state the follow loop keys on. Entering must
+    // land in lock 'follow' with the pre-ride view held for the way out.
+    const s = cockpitReducer({ status: 'idle' }, { type: 'ENTER', target, savedView: view });
+    expect(s.status).toBe('riding');
+    expect(s).toMatchObject({ lock: 'follow', savedView: view });
+  });
+
+  it('popups stay shut for the whole ride and open again after it', () => {
+    const s = cockpitReducer({ status: 'idle' }, { type: 'ENTER', target, savedView: view });
+    expect(mapPopupsAllowed(s.status === 'riding')).toBe(false);
+    const back = cockpitReducer(s, { type: 'EXIT' });
+    expect(mapPopupsAllowed(back.status === 'riding')).toBe(true);
+    expect(mapPopupsAllowed(false)).toBe(true);
+    expect(mapPopupsAllowed(true)).toBe(false);
   });
 });

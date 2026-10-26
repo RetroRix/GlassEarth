@@ -21,6 +21,26 @@ import type { ViewSnapshot } from './view-history';
 export const COCKPIT_ZOOM = 11.5;
 export const COCKPIT_PITCH = 76;
 
+/**
+ * FPV framing: the map is padded at the top by this fraction of the screen
+ * height, which drops the aircraft to the bottom edge of the frame — a nose,
+ * not a marker in the middle — so the frame is overwhelmingly the world
+ * ahead: horizon up top, ground streaming below. (MapLibre places the
+ * camera centre at 50% + fraction/2 of the height: 0.55 puts the aircraft
+ * ~78% down the frame.)
+ */
+export const COCKPIT_TOP_PADDING_FRACTION = 0.55;
+
+/**
+ * While a ride owns the screen, the map's popups stay shut: the forward
+ * view is the product, and a panel anchored over it is exactly what the
+ * FPV rework removed. Entering a ride dismisses any open popup, and the
+ * popup helper refuses to open another until the ride ends.
+ */
+export function mapPopupsAllowed(rideActive: boolean): boolean {
+  return !rideActive;
+}
+
 /** Contacts roster radius — the same 250 km bubble the comparison used. */
 export const CONTACT_RADIUS_KM = 250;
 /** How many contacts the roster lists, nearest first. */

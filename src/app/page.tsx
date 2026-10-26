@@ -21,7 +21,8 @@ import SearchBar from '@/components/SearchBar';
 import DirectionsBar, { type RouteResult, type LiveLocation, type TripPlan } from '@/components/DirectionsBar';
 import NavigationView from '@/components/NavigationView';
 import FlightWatchPanel, { type WatchedFlight, type FlightTelemetry, type AircraftDetail, type Airport } from '@/components/FlightWatchPanel';
-import CockpitPanel, { CockpitEndedNotice, type CockpitFlightRecord } from '@/components/CockpitPanel';
+import CockpitOSD, { CockpitEndedNotice, type CockpitFlightRecord } from '@/components/CockpitOSD';
+import { EMPTY_ROUTE_GEOMETRY, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import { stopsAhead, type NavProgress } from '@/lib/navigation';
 import type { TransitStatus } from '@/lib/transit-layer';
 import type { LiveDetection } from '@/lib/malware-intel';
@@ -405,6 +406,12 @@ export default function Dashboard() {
       : null),
     [cockpitState],
   );
+
+  /* The route the map draws under a ride — the flown track and the
+     corroborated destination, resolved by the OSD from the same lookups
+     the watch panel makes. Only a live ride has one. */
+  const [cockpitRoute, setCockpitRoute] = useState<CockpitRouteGeometry>(EMPTY_ROUTE_GEOMETRY);
+  const handleCockpitRoute = useCallback((g: CockpitRouteGeometry) => setCockpitRoute(g), []);
 
   // The ridden aircraft's live record, from the same buckets the watch
   // panel reads — plus the whole feed, for the nearby-flights roster.
@@ -2028,6 +2035,7 @@ export default function Dashboard() {
           followUser={followUser}
           onFollowInterrupt={() => setFollowUser(false)}
           cockpitTarget={cockpitTargetProp}
+          cockpitRoute={cockpitState.status === 'riding' ? cockpitRoute : null}
           onCockpitGrab={handleCockpitGrab}
           onCockpitLost={handleCockpitLost}
           navigating={Boolean(navSession)}
@@ -2140,8 +2148,9 @@ export default function Dashboard() {
       </AnimatePresence>
 
 
-      {/* ── FLIGHT WATCH ── */}
-      {watchedFlights.length > 0 && (
+      {/* ── FLIGHT WATCH ── (steps aside while a cockpit ride owns the screen —
+          the FPV frame carries nothing but corner readouts) */}
+      {watchedFlights.length > 0 && cockpitState.status !== 'riding' && (
         <motion.div
           initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }}
           className="absolute top-3 z-[380] w-[min(92vw,290px)] pointer-events-auto
@@ -2159,11 +2168,12 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* ── COCKPIT ── */}
+      {/* ── COCKPIT OSD ── the FPV rework: corner readouts only, the centre
+          of the screen is the forward view and stays empty. */}
       {cockpitState.status === 'riding' && (
-        <div data-hud className="absolute bottom-[86px] md:bottom-[112px] left-1/2 -translate-x-1/2 z-[380] w-[min(94vw,600px)] pointer-events-auto">
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }}>
-            <CockpitPanel
+        <div data-hud className="absolute inset-0 z-[380] pointer-events-none">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }} className="absolute inset-0">
+            <CockpitOSD
               target={cockpitState.target}
               flight={cockpitRecord}
               lock={cockpitState.lock}
@@ -2171,13 +2181,14 @@ export default function Dashboard() {
               onHop={enterCockpit}
               onRecenter={() => dispatchCockpit({ type: 'RECENTER' })}
               onExit={exitCockpit}
+              onRouteGeometry={handleCockpitRoute}
             />
           </motion.div>
         </div>
       )}
       {cockpitState.status === 'ended' && (
-        <div data-hud className="absolute bottom-[86px] md:bottom-[112px] left-1/2 -translate-x-1/2 z-[380] w-[min(94vw,600px)] pointer-events-auto">
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }}>
+        <div data-hud className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[380] w-[min(92vw,430px)] pointer-events-auto">
+          <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.18 }}>
             <CockpitEndedNotice notice={cockpitState.notice} onDismiss={() => dispatchCockpit({ type: 'ACK' })} />
           </motion.div>
         </div>

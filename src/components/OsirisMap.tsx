@@ -14,9 +14,10 @@ import { createSatelliteLayer, parseColor, SAT_MAX_ZOOM, type SatPoint } from '@
 import { MAP_DEFAULTS, MAP_PALETTE_KEYS, readMapPalette, satColorFor, type MapPalette } from '@/lib/map-palette';
 import { CAMERA_SETTLE_MS, cameraGhostFadeMs, cameraGhostPaint, cameraGhostState, type CameraGhostState } from '@/lib/camera-ghosting';
 import {
-  COCKPIT_PITCH, COCKPIT_ZOOM, LOST_GRACE_MS,
-  createFollowSmoother, type CockpitFix,
+  COCKPIT_PITCH, COCKPIT_TOP_PADDING_FRACTION, COCKPIT_ZOOM, LOST_GRACE_MS,
+  createFollowSmoother, mapPopupsAllowed, type CockpitFix,
 } from '@/lib/cockpit';
+import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -142,6 +143,9 @@ interface OsirisMapProps {
    *  set, the map's camera follows the aircraft; `locked` false means the
    *  visitor grabbed the map and the follow — not the ride — is paused. */
   cockpitTarget?: { icao24: string; locked: boolean } | null;
+  /** The ridden aircraft's route (lib/cockpit-osd): the flown track plus the
+   *  corroborated destination, drawn as a line under the ride. */
+  cockpitRoute?: CockpitRouteGeometry | null;
   /** The visitor grabbed the map mid-ride (a real gesture, never our own camera moves). */
   onCockpitGrab?: () => void;
   /** The ridden aircraft landed or left the feed — the ride should end. */
@@ -231,7 +235,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, onCockpitGrab, onCockpitLost }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -249,6 +253,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   const cockpitActiveRef = useRef(false);
   const cockpitGrabRef = useRef(onCockpitGrab);
   const cockpitLostRef = useRef(onCockpitLost);
+  const cockpitRouteRef = useRef(cockpitRoute);
   /* The Live Alert pins currently drawn, and the opener for one of them, so
      the feed's locate button can land on a pin and open it. */
   const alertPinsRef = useRef<AlertPinFeature[]>([]);
@@ -879,13 +884,32 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // The ridden aircraft's own marker: a dedicated source the follow loop
       // moves every frame at the smoothed pose, because the bucket layers only
       // carry the last raw fix — at cruise that sits kilometres behind the camera.
+      // ── COCKPIT ROUTE (lib/cockpit-osd) ──
+      // The ridden aircraft's route: the track it has actually flown (solid)
+      // and the leg ahead to its corroborated destination (dashed), so the
+      // pitched view reads as travelling a route, not chasing a dot. The
+      // follow loop rewrites this source every frame.
+      map.addSource('cockpit-route', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'cockpit-route-flown', type: 'line', source: 'cockpit-route',
+        filter: ['==', ['get', 'seg'], 'flown'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': 'rgba(255,179,0,0.5)', 'line-width': 2 } });
+      map.addLayer({ id: 'cockpit-route-ahead', type: 'line', source: 'cockpit-route',
+        filter: ['==', ['get', 'seg'], 'ahead'],
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': 'rgba(255,179,0,0.95)', 'line-width': 2.5, 'line-dasharray': [2, 1.4] } });
+      map.addLayer({ id: 'cockpit-route-dest', type: 'circle', source: 'cockpit-route',
+        filter: ['==', ['get', 'seg'], 'dest'],
+        paint: { 'circle-radius': 6, 'circle-color': 'rgba(255,179,0,0.25)',
+          'circle-stroke-width': 2, 'circle-stroke-color': '#FFB300' } });
+
       map.addSource('cockpit-plane', { type: 'geojson', data: EMPTY_FC });
       map.addLayer({ id: 'cockpit-plane-ring', type: 'circle', source: 'cockpit-plane', paint: {
-        'circle-radius': 17, 'circle-color': 'rgba(0,229,255,0.07)',
+        'circle-radius': 11, 'circle-color': 'rgba(0,229,255,0.07)',
         'circle-stroke-width': 1.5, 'circle-stroke-color': 'rgba(0,229,255,0.55)', 'circle-stroke-opacity': 0.8,
       }});
       map.addLayer({ id: 'cockpit-plane-marker', type: 'symbol', source: 'cockpit-plane', layout: {
-        'icon-image': ['get', 'icon'], 'icon-size': 1.6,
+        'icon-image': ['get', 'icon'], 'icon-size': 1.05,
         'icon-rotate': ['get', 'heading'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
       }, paint: { 'icon-opacity': 1 }});
 
@@ -1079,6 +1103,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     // ── POPUP HELPER ──
     const popup = (coords: any, html: string) => {
+      if (!mapPopupsAllowed(cockpitActiveRef.current)) { popupRef.current?.remove(); return; }
       popupRef.current?.remove();
       popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '420px', offset: 14 }).setLngLat(coords).setHTML(html).addTo(map);
     };
@@ -1103,6 +1128,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     // ── Flights (with FlightAware + ADS-B Exchange links + ROUTE VISUALIZATION) ──
     ['fl-commercial','fl-private','fl-jets','fl-military'].forEach(layer => {
       map.on('click', layer, e => {
+        if (cockpitActiveRef.current) return; // a ride owns the screen — no popup over the FPV view
         if (!e.features?.length) return;
         const p = e.features[0].properties as any;
         const coords = (e.features[0].geometry as any).coordinates;
@@ -2986,7 +3012,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   // Keep the refs the cockpit loop reads pointed at the latest render.
   useEffect(() => { dataRef.current = data; });
-  useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; });
+  useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; cockpitRouteRef.current = cockpitRoute; });
 
   // ── COCKPIT FOLLOW (lib/cockpit) ──
   // A rAF loop glides the camera along with the ridden aircraft: the
@@ -3012,7 +3038,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
     const container = containerRef.current;
     if (container) {
-      try { map.setPadding({ top: Math.round(container.clientHeight * 0.3), bottom: 0, left: 0, right: 0 }); } catch { /* mid-teardown */ }
+      try { map.setPadding({ top: Math.round(container.clientHeight * COCKPIT_TOP_PADDING_FRACTION), bottom: 0, left: 0, right: 0 }); } catch { /* mid-teardown */ }
     }
 
     const start = map.getCenter();
@@ -3086,6 +3112,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
             properties: { heading: Math.round(pose.bearingDeg), icon },
           } as never);
         }
+        const routeSrc = map.getSource('cockpit-route') as maplibregl.GeoJSONSource | undefined;
+        if (routeSrc) {
+          routeSrc.setData({
+            type: 'FeatureCollection',
+            features: routeLineFeatures(pose, cockpitRouteRef.current ?? { track: [], destination: null }),
+          } as never);
+        }
         if (locked) {
           map.jumpTo({
             center: [pose.lng, pose.lat],
@@ -3115,6 +3148,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       try {
         const src = map.getSource('cockpit-plane') as maplibregl.GeoJSONSource | undefined;
         if (src) src.setData(EMPTY_FC as never);
+        const routeSrc = map.getSource('cockpit-route') as maplibregl.GeoJSONSource | undefined;
+        if (routeSrc) routeSrc.setData(EMPTY_FC as never);
       } catch { /* mid-teardown */ }
     };
   }, [mapReady, cockpitTarget]);
