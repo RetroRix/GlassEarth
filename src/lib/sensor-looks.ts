@@ -35,6 +35,18 @@
  * a luminance ramp to phosphor green for night vision, and a luminance ramp
  * through the ironbow palette for thermal. Noir, CRT and Snow are plain CSS
  * filter chains; CRT adds its scanlines through the overlay div.
+ *
+ * One hard-won mechanical rule: the defs element MUST be a real SVG element,
+ * created with createElementNS. A plain createElement('svg') returns an
+ * HTMLUnknownElement in HTML documents, and its innerHTML parses as unknown
+ * HTML tags — the ids exist in the document but no SVGFilterElement is ever
+ * registered, so every `filter: url("#…")` declaration is invalid and the
+ * browser silently drops it, leaving the look completely untreated on every
+ * surface. That is exactly what shipped in f4b3bfc and what the 2026-10-26
+ * browser verification caught (Night Vision showed only its vignette;
+ * Thermal showed nothing at all). The namespaced construction below is
+ * proven against a real Chromium: img, canvas-2d and WebGL surfaces all
+ * take the ramp (see the fix-round report).
  */
 
 export const LOOK_STORAGE_KEY = 'osiris:sensor-look';
@@ -216,6 +228,28 @@ function upsert(id: string, tag: string, parent: HTMLElement, fill: (el: HTMLEle
   return el;
 }
 
+export const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * The defs element MUST live in the SVG namespace, or the <filter> children
+ * parse as unknown HTML elements and `url("#…")` references resolve to
+ * nothing (see the header note). createElementNS is the only construction
+ * that registers real filter primitives. Falls back to createElement only
+ * where createElementNS does not exist (non-browser stubs).
+ */
+function upsertSvgDefs(id: string, parent: HTMLElement, fill: (el: HTMLElement) => void) {
+  let el = document.getElementById(id) as HTMLElement | null;
+  if (!el) {
+    el = (typeof document.createElementNS === 'function'
+      ? document.createElementNS(SVG_NS, 'svg')
+      : document.createElement('svg')) as HTMLElement;
+    el.id = id;
+    parent.appendChild(el);
+  }
+  fill(el);
+  return el;
+}
+
 function drop(id: string) {
   document.getElementById(id)?.remove();
 }
@@ -234,7 +268,7 @@ export function applyLook(id: SensorLookId | null) {
   } else drop(LOOK_STYLE_TAG_ID);
 
   if (plan.defs) {
-    upsert(LOOK_DEFS_ID, 'svg', body, el => {
+    upsertSvgDefs(LOOK_DEFS_ID, body, el => {
       el.setAttribute('aria-hidden', 'true');
       el.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
       el.innerHTML = LOOK_DEFS;

@@ -8,6 +8,7 @@ import {
   LOOK_DEFS_ID,
   LOOK_OVERLAY_ID,
   LOOK_MEDIA_CLASS,
+  SVG_NS,
   buildLookCss,
   lookPlan,
   parseLookId,
@@ -140,6 +141,11 @@ class FakeEl {
   style: Record<string, string> = {};
   children: FakeEl[] = [];
   parent: FakeEl | null = null;
+  /** The namespace the element was created in — the whole point of the
+   *  2026-10-26 fix: an 'svg' element in the HTML namespace (what a plain
+   *  createElement('svg') yields) never registers its <filter> children,
+   *  so the look silently renders nothing. */
+  namespaceURI: string | null = null;
   constructor(readonly tagName: string) {}
   setAttribute(k: string, v: string) { this.attrs.set(k, v); }
   getAttribute(k: string) { return this.attrs.get(k) ?? null; }
@@ -153,9 +159,12 @@ class FakeEl {
   }
 }
 
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+
 function makeDocument() {
   const body = new FakeEl('body');
   const head = new FakeEl('head');
+  const nsCalls: Array<{ ns: string; tag: string }> = [];
   const find = (el: FakeEl, id: string): FakeEl | null => {
     if (el.id === id) return el;
     for (const c of el.children) { const hit = find(c, id); if (hit) return hit; }
@@ -164,7 +173,17 @@ function makeDocument() {
   return {
     body,
     head,
-    createElement: (tag: string) => new FakeEl(tag),
+    nsCalls,
+    /* A plain createElement puts the element in the HTML namespace — for
+       'svg' that means HTMLUnknownElement in a real browser, which is the
+       exact behaviour the shipped bug ran into. */
+    createElement: (tag: string) => { const el = new FakeEl(tag); el.namespaceURI = HTML_NS; return el; },
+    createElementNS: (ns: string, tag: string) => {
+      nsCalls.push({ ns, tag });
+      const el = new FakeEl(tag);
+      el.namespaceURI = ns;
+      return el;
+    },
     getElementById: (id: string) => find(body, id) ?? find(head, id),
   };
 }
@@ -267,6 +286,35 @@ describe('applyLook — theme restoration', () => {
     const before = themeSnapshot(doc, ls);
     applyLook(null);
     expect(themeSnapshot(doc, ls)).toBe(before);
+  });
+
+  /* The 2026-10-26 browser-verification failure: the defs were created with
+     a plain createElement('svg'), which is an HTMLUnknownElement in a real
+     browser — its <filter> children never register, `url("#…")` resolves to
+     nothing, and the two palette looks rendered completely untreated. The
+     defs element must be built in the SVG namespace. */
+  it('creates the defs element in the SVG namespace, never via createElement', () => {
+    for (const id of ['night-vision', 'thermal'] as SensorLookId[]) {
+      doc.nsCalls.length = 0;
+      applyLook(null);
+      applyLook(id);
+      const defs = doc.getElementById(LOOK_DEFS_ID);
+      expect(defs).not.toBeNull();
+      expect(defs!.tagName).toBe('svg');
+      expect(defs!.namespaceURI).toBe(SVG_NS);
+      expect(doc.nsCalls).toEqual([{ ns: SVG_NS, tag: 'svg' }]);
+      expect(defs!.innerHTML).toBe(LOOK_DEFS);
+    }
+  });
+
+  it('creates no namespaced element at all for the CSS-chain looks', () => {
+    for (const id of ['noir', 'crt', 'snow'] as SensorLookId[]) {
+      doc.nsCalls.length = 0;
+      applyLook(null);
+      applyLook(id);
+      expect(doc.getElementById(LOOK_DEFS_ID)).toBeNull();
+      expect(doc.nsCalls).toEqual([]);
+    }
   });
 });
 
