@@ -55,6 +55,7 @@ const DrawHud = dynamic(() => import('@/components/DrawHud'), { ssr: false });
 // not the toolbar has loaded yet.
 import { toShape, queryRing, type DrawMode, type DrawnShape, type DrawProgress, type DrawResult } from '@/lib/draw';
 import { selectInPolygon } from '@/lib/aoi';
+import { searchPlaces } from '@/lib/geosearch';
 import { diffSweep, appendEvents, type WatchBaseline, type WatchEvent } from '@/lib/watch';
 import { STORAGE_KEY, serializeShapes, deserializeShapes, shapesToGeoJSON, downloadFile } from '@/lib/aoi-export';
 import SupportMenu from '@/components/SupportMenu';
@@ -695,8 +696,7 @@ export default function Dashboard() {
     },
     geocode: async q => {
       try {
-        const res = await fetch(`/api/geosearch?q=${encodeURIComponent(q)}`);
-        const hit = (await res.json())?.results?.[0];
+        const hit = (await searchPlaces(q))[0];
         return hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lng) ? { name: hit.name, lat: hit.lat, lng: hit.lng, kind: hit.kind } : null;
       } catch { return null; }
     },
