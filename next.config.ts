@@ -48,7 +48,14 @@ const nextConfig: NextConfig = {
   /* No images.remotePatterns: nothing renders next/image, and the old
      `hostname: '**'` let anyone use /_next/image to fetch and resize pictures
      from any host through this server. A remote image source added later
-     should be listed by exact host. */
+     should be listed by exact host.
+     `unoptimized` goes one step further and switches the optimizer off, so
+     /_next/image answers 404 before it fetches or decodes anything. Nothing
+     here needs resized images, and the optimizer is where most of Next's
+     recent advisories have been. */
+  images: {
+    unoptimized: true,
+  },
   async headers() {
     return [
       /* The worker path carries the MapLibre version, so a given URL never

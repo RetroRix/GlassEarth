@@ -323,7 +323,7 @@ export const API_GROUPS: ApiGroup[] = [
         path: '/api/proxy-tiles',
         method: 'GET',
         summary: 'Same-origin raster tile proxy for basemaps that block cross-origin reads.',
-        params: [{ name: 'url', required: true, desc: 'Upstream tile URL.' }],
+        params: [{ name: 'url', required: true, desc: 'Upstream tile URL, https on `*.basemaps.cartocdn.com`. Any query string is dropped.' }],
         returns: ['…binary tile'],
       },
       {
