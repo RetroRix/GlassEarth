@@ -1912,6 +1912,7 @@ export default function Dashboard() {
           onReady={() => setMapReady(true)}
           flyToLocation={flyToLocation}
           alertPinIds={pinnedAlertIds}
+          openCameraId={shareCameraId}
           scanTargets={scanTargets}
           demoMode={demoMode}
           theme={osirisTheme}

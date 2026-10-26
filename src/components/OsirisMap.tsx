@@ -12,6 +12,7 @@ import { attachHighlights, type Highlighter } from '@/lib/oi/highlights';
 import type { Highlight } from '@/lib/oi/assist/tools';
 import { createSatelliteLayer, parseColor, SAT_MAX_ZOOM, type SatPoint } from '@/lib/satellite-layer';
 import { MAP_DEFAULTS, MAP_PALETTE_KEYS, readMapPalette, satColorFor, type MapPalette } from '@/lib/map-palette';
+import { CAMERA_SETTLE_MS, cameraGhostFadeMs, cameraGhostPaint, cameraGhostState, type CameraGhostState } from '@/lib/camera-ghosting';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -80,6 +81,10 @@ interface OsirisMapProps {
   onReady?: () => void;
   /** Which Live Alerts to pin — the reports the feed is showing. Null pins them all. */
   alertPinIds?: string[] | null;
+  /** The camera open in the viewer, if any. Its dot is exempt from camera
+   *  ghosting (lib/camera-ghosting): it rides its own layer at full strength
+   *  whatever the rest of the dots are doing. */
+  openCameraId?: string | null;
   projection?: 'mercator' | 'globe';
   terrainEnabled?: boolean;
   terrainRetry?: number;
@@ -214,10 +219,15 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  /* Whether the camera dots are populated or ghosted right now — see
+     lib/camera-ghosting. A ref because the map handlers that drive it are
+     registered once on load, and the recolour effect consults it too. The
+     map opens on the globe, which is ghost country. */
+  const cameraGhostRef = useRef<CameraGhostState>('ghost');
   /* The Live Alert pins currently drawn, and the opener for one of them, so
      the feed's locate button can land on a pin and open it. */
   const alertPinsRef = useRef<AlertPinFeature[]>([]);
@@ -531,6 +541,15 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // CCTV — main dot
       map.addLayer({ id: 'cctv-dots', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8, 14,12],
+        'circle-color': cameraColor, 'circle-opacity': 0.9,
+        'circle-stroke-width': 2.5, 'circle-stroke-color': '#000000', 'circle-stroke-opacity': 0.9,
+      }});
+      // CCTV — the open camera's dot. Ghosting (lib/camera-ghosting) fades the
+      // shared dot layers while exploring; the camera being watched must never
+      // fade, so it rides its own layer at full strength, filtered to its id
+      // and drawn a step larger so it reads as the pinned one.
+      map.addLayer({ id: 'cctv-open', type: 'circle', source: 'cctv', filter: ['==', ['to-string', ['get', 'id']], ''], paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,5, 5,7, 10,10, 14,14],
         'circle-color': cameraColor, 'circle-opacity': 0.9,
         'circle-stroke-width': 2.5, 'circle-stroke-color': '#000000', 'circle-stroke-opacity': 0.9,
       }});
@@ -981,6 +1000,47 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     map.on('moveend', reportCamera);
     map.on('idle', reportCamera);
     reportCamera();
+
+    /* ── CAMERA GHOSTING (lib/camera-ghosting) ──
+       While the map moves, or sits wider than a city, the camera dots ghost;
+       settled at city zoom or deeper, they populate. "Settled" is the app's
+       own signal — the moveend view the page records — plus a short stillness
+       window before the fade-in, so a pan ending mid-gesture doesn't flash
+       full strength between moves. The fade itself is MapLibre's paint
+       transition, re-aimed per direction: ghosting is quick, arriving is slow. */
+    let ghostSettleTimer: ReturnType<typeof setTimeout> | null = null;
+    const applyCameraGhost = (state: CameraGhostState, instant = false) => {
+      cameraGhostRef.current = state;
+      if (!map.getLayer('cctv-dots')) return;
+      const paint = cameraGhostPaint(theme, state);
+      const duration = instant ? 0 : cameraGhostFadeMs(state);
+      type GhostPaintProp = 'circle-opacity' | 'circle-stroke-opacity' | 'text-opacity';
+      const set = (layer: string, prop: GhostPaintProp, value: number) => {
+        try {
+          map.setPaintProperty(layer, `${prop}-transition`, { duration, delay: 0 });
+          map.setPaintProperty(layer, prop, value);
+        } catch { /* style not settled */ }
+      };
+      if (map.getLayer('cctv-glow')) set('cctv-glow', 'circle-opacity', paint.glow);
+      set('cctv-dots', 'circle-opacity', paint.dots);
+      set('cctv-dots', 'circle-stroke-opacity', paint.stroke);
+      if (map.getLayer('cctv-label')) set('cctv-label', 'text-opacity', paint.label);
+    };
+    map.on('movestart', () => {
+      if (ghostSettleTimer) { clearTimeout(ghostSettleTimer); ghostSettleTimer = null; }
+      applyCameraGhost('ghost');
+    });
+    map.on('moveend', () => {
+      if (ghostSettleTimer) clearTimeout(ghostSettleTimer);
+      ghostSettleTimer = setTimeout(() => {
+        ghostSettleTimer = null;
+        applyCameraGhost(cameraGhostState({ zoom: map.getZoom(), settled: true }));
+      }, CAMERA_SETTLE_MS);
+    });
+    /* The opening view is the globe, so the first paint is already ghosted —
+       set it without a fade rather than fading out under the splash. Registered
+       after the layer-adding load handler above, so the layers exist by now. */
+    map.on('load', () => applyCameraGhost(cameraGhostState({ zoom: map.getZoom(), settled: true }), true));
 
     // ── POPUP HELPER ──
     const popup = (coords: any, html: string) => {
@@ -1774,6 +1834,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     sizeToContainer.observe(container);
 
     return () => {
+      if (ghostSettleTimer) clearTimeout(ghostSettleTimer);
       sizeToContainer.disconnect();
       cancelAnimationFrame(hoverFrame);
       map.remove();
@@ -1897,6 +1958,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!mapReady || !mapRef.current) return;
       const map = mapRef.current;
       if (map.getLayer('cctv-dots')) map.setPaintProperty('cctv-dots', 'circle-color', palette.cctv);
+      if (map.getLayer('cctv-open')) map.setPaintProperty('cctv-open', 'circle-color', palette.cctv);
       if (map.getLayer('cctv-label')) {
         if (theme === 'day') {
           /* Re-assert the day label treatment rather than pushing the
@@ -1905,12 +1967,25 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           map.setPaintProperty('cctv-label', 'text-color', CCTV_LABEL_DAY.color);
           map.setPaintProperty('cctv-label', 'text-halo-color', CCTV_LABEL_DAY.halo);
           map.setPaintProperty('cctv-label', 'text-halo-width', CCTV_LABEL_DAY.haloWidth);
-          map.setPaintProperty('cctv-label', 'text-opacity', CCTV_LABEL_DAY.opacity);
+          /* Opacity belongs to camera ghosting, not the recolour: at full
+             strength this is CCTV_LABEL_DAY.opacity exactly (the lib's day
+             'full' label is 1), and while ghosted the labels ghost too. */
+          map.setPaintProperty('cctv-label', 'text-opacity', cameraGhostPaint(theme, cameraGhostRef.current).label);
         } else {
           map.setPaintProperty('cctv-label', 'text-color', palette.cctv);
         }
       }
     }, [mapReady, palette.cctv, theme]);
+
+  /* The open camera's dot: point the cctv-open layer's filter at it (or at
+     nothing, when the viewer closes). Same try/catch shape as the alert-pin
+     selection — a filter set before the style settles is dropped, not fatal. */
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+    if (!map.getLayer('cctv-open')) return;
+    try { map.setFilter('cctv-open', ['==', ['to-string', ['get', 'id']], openCameraId ?? ''] as never); } catch { /* style not settled */ }
+  }, [mapReady, openCameraId]);
 
   // ── DECOUPLED LAYER RENDERERS (Performance Optimized) ──
 
@@ -2332,7 +2407,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['fl-private'], activeLayers.private);
     setVis(['fl-jets'], activeLayers.jets);
     setVis(['fl-military'], activeLayers.military);
-    setVis(['cctv-glow','cctv-dots','cctv-label'], activeLayers.cctv);
+    setVis(['cctv-glow','cctv-dots','cctv-open','cctv-label'], activeLayers.cctv);
     setVis(['fires-heat'], activeLayers.fires);
     setVis(['weather-glow','weather-dots','weather-label'], activeLayers.weather);
     setVis(['infra-glow','infra-dots','infra-label'], activeLayers.infrastructure);
