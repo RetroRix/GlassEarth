@@ -13,6 +13,10 @@ import type { Highlight } from '@/lib/oi/assist/tools';
 import { createSatelliteLayer, parseColor, SAT_MAX_ZOOM, type SatPoint } from '@/lib/satellite-layer';
 import { MAP_DEFAULTS, MAP_PALETTE_KEYS, readMapPalette, satColorFor, type MapPalette } from '@/lib/map-palette';
 import { CAMERA_SETTLE_MS, cameraGhostFadeMs, cameraGhostPaint, cameraGhostState, type CameraGhostState } from '@/lib/camera-ghosting';
+import {
+  COCKPIT_PITCH, COCKPIT_ZOOM, LOST_GRACE_MS,
+  createFollowSmoother, type CockpitFix,
+} from '@/lib/cockpit';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -134,6 +138,14 @@ interface OsirisMapProps {
   aircraftAirports?: Record<string, Array<{ icao: string; iata?: string; city?: string; lat: number; lng: number }>>;
   /** Hands the page OI's globe layer, so a run draws without re-rendering the map. Null when it goes. */
   onOiGlobe?: (globe: OiGlobe | null) => void;
+  /** Ride along with this aircraft in the cockpit view (lib/cockpit). While
+   *  set, the map's camera follows the aircraft; `locked` false means the
+   *  visitor grabbed the map and the follow — not the ride — is paused. */
+  cockpitTarget?: { icao24: string; locked: boolean } | null;
+  /** The visitor grabbed the map mid-ride (a real gesture, never our own camera moves). */
+  onCockpitGrab?: () => void;
+  /** The ridden aircraft landed or left the feed — the ride should end. */
+  onCockpitLost?: (reason: 'landed' | 'lost') => void;
   /** A piece of OI's analysis was clicked: an arc ("link:<id>") or a point ("a:<actor>", "e:<event>"…); null for empty map. */
   onOiSelect?: (key: string | null) => void;
   /** The pointer is over a piece of OI's analysis, or has left it. */
@@ -219,7 +231,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, onCockpitGrab, onCockpitLost }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -228,6 +240,15 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
      registered once on load, and the recolour effect consults it too. The
      map opens on the globe, which is ghost country. */
   const cameraGhostRef = useRef<CameraGhostState>('ghost');
+  /* Latest data prop, for the cockpit follow loop — it samples the feed
+   *  from a rAF loop, long after the render that delivered the data. */
+  const dataRef = useRef(data);
+  /* True while a cockpit ride owns the camera. The settled-view reporter
+   *  consults it: a ride crosses the whole map, and none of those passing
+   *  views belongs in the page's view history or last-view memory. */
+  const cockpitActiveRef = useRef(false);
+  const cockpitGrabRef = useRef(onCockpitGrab);
+  const cockpitLostRef = useRef(onCockpitLost);
   /* The Live Alert pins currently drawn, and the opener for one of them, so
      the feed's locate button can land on a pin and open it. */
   const alertPinsRef = useRef<AlertPinFeature[]>([]);
@@ -854,6 +875,20 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         }, paint: { 'icon-opacity': 0.85 }});
       });
 
+      // ── COCKPIT MARKER (lib/cockpit) ──
+      // The ridden aircraft's own marker: a dedicated source the follow loop
+      // moves every frame at the smoothed pose, because the bucket layers only
+      // carry the last raw fix — at cruise that sits kilometres behind the camera.
+      map.addSource('cockpit-plane', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'cockpit-plane-ring', type: 'circle', source: 'cockpit-plane', paint: {
+        'circle-radius': 17, 'circle-color': 'rgba(0,229,255,0.07)',
+        'circle-stroke-width': 1.5, 'circle-stroke-color': 'rgba(0,229,255,0.55)', 'circle-stroke-opacity': 0.8,
+      }});
+      map.addLayer({ id: 'cockpit-plane-marker', type: 'symbol', source: 'cockpit-plane', layout: {
+        'icon-image': ['get', 'icon'], 'icon-size': 1.6,
+        'icon-rotate': ['get', 'heading'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+      }, paint: { 'icon-opacity': 1 }});
+
       // Route layers are added later (after setMapReady) so they render on top of everything.
 
       // Balloons (moving entities)
@@ -988,7 +1023,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         lastRightClick = { at: now, x, y };
       }
     });
-    const reportViewState = () => { const c = map.getCenter(); onViewStateChange?.({ zoom: map.getZoom(), latitude: c.lat, longitude: c.lng, bearing: map.getBearing(), pitch: map.getPitch() }); };
+    const reportViewState = () => { if (cockpitActiveRef.current) return; const c = map.getCenter(); onViewStateChange?.({ zoom: map.getZoom(), latitude: c.lat, longitude: c.lng, bearing: map.getBearing(), pitch: map.getPitch() }); };
     map.on('load', reportViewState);
     map.on('moveend', reportViewState);
     // Lightweight settled-view diagnostics for camera/terrain regressions.
@@ -1092,6 +1127,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
             <span style="color:#5C5A54;font-size:9px;letter-spacing:0.1em;">IDENTIFYING AIRFRAME…</span>
           </div>
           <button onclick="window.osirisWatchFlight && window.osirisWatchFlight({ icao24: '${idSafe(p.icao24||'')}', callsign: '${idSafe(cs)}' })" style="width:100%;margin-top:8px;padding:6px 12px;background:rgba(0,229,255,0.10);border:1px solid rgba(0,229,255,0.35);color:#7FE9FF;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">+ WATCH THIS AIRCRAFT</button>
+          <button onclick="window.osirisRideFlight && window.osirisRideFlight({ icao24: '${idSafe(p.icao24||'')}', callsign: '${idSafe(cs)}' })" style="width:100%;margin-top:6px;padding:6px 12px;background:rgba(255,176,0,0.10);border:1px solid rgba(255,176,0,0.40);color:#FFC46B;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">RIDE IN THE COCKPIT</button>
           <div id="${routeLoadingId}" style="margin-top:8px;padding:6px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;">
             <span style="color:#5C5A54;font-size:9px;letter-spacing:0.1em;">RESOLVING ROUTE…</span>
           </div>
@@ -2947,6 +2983,141 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [mapReady, userLocation]);
+
+  // Keep the refs the cockpit loop reads pointed at the latest render.
+  useEffect(() => { dataRef.current = data; });
+  useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; });
+
+  // ── COCKPIT FOLLOW (lib/cockpit) ──
+  // A rAF loop glides the camera along with the ridden aircraft: the
+  // smoother dead-reckons between feed fixes and blends each correction, so
+  // the world turns with the plane instead of jumping at every poll. The map
+  // is padded at the top so the aircraft sits low in the frame and the view
+  // ahead — the way the pilot sees it — fills the screen. The aircraft's
+  // bucket icon is filtered out for the duration; the dedicated cockpit
+  // marker (smoothed pose, every frame) replaces it.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !cockpitTarget) return;
+    const map = mapRef.current;
+    const icao = cockpitTarget.icao24;
+    const locked = cockpitTarget.locked;
+    cockpitActiveRef.current = true;
+    popupRef.current?.remove();
+
+    const FLIGHT_LAYERS = ['fl-commercial', 'fl-private', 'fl-jets', 'fl-military'];
+    FLIGHT_LAYERS.forEach(id => {
+      if (map.getLayer(id)) {
+        try { map.setFilter(id, ['!=', ['get', 'icao24'], icao] as never); } catch { /* style not settled */ }
+      }
+    });
+    const container = containerRef.current;
+    if (container) {
+      try { map.setPadding({ top: Math.round(container.clientHeight * 0.3), bottom: 0, left: 0, right: 0 }); } catch { /* mid-teardown */ }
+    }
+
+    const start = map.getCenter();
+    const smoother = createFollowSmoother({ lat: start.lat, lng: start.lng, bearingDeg: map.getBearing() });
+    let icon = 'plane-cyan';
+    let lastSeenMs = Date.now();
+    let wasAirborne = false;
+    let lostFired = false;
+
+    /* The least of a feed row the follow loop reads. */
+    interface FeedRow { icao24?: string; lat: number; lng: number; heading?: number; speed_knots?: number | null; grounded?: boolean }
+    const pullFix = () => {
+      const d = dataRef.current as {
+        commercial_flights?: FeedRow[]; private_flights?: FeedRow[];
+        private_jets?: FeedRow[]; military_flights?: FeedRow[];
+      } | null;
+      const buckets: Array<[FeedRow[] | undefined, string]> = [
+        [d?.commercial_flights, 'plane-cyan'],
+        [d?.private_flights, 'plane-green'],
+        [d?.private_jets, 'plane-pink'],
+        [d?.military_flights, 'plane-red'],
+      ];
+      for (const [arr, bucketIcon] of buckets) {
+        const f = (arr || []).find((x) => x?.icao24 === icao);
+        if (!f || !Number.isFinite(f.lat) || !Number.isFinite(f.lng)) continue;
+        lastSeenMs = Date.now();
+        icon = bucketIcon;
+        if (!f.grounded) wasAirborne = true;
+        if (f.grounded && wasAirborne && !lostFired) {
+          lostFired = true;
+          cockpitLostRef.current?.('landed');
+          return;
+        }
+        const fix: CockpitFix = {
+          lat: f.lat, lng: f.lng,
+          headingDeg: f.heading || 0,
+          speedKnots: f.speed_knots || 0,
+          grounded: f.grounded,
+          atMs: Date.now(),
+        };
+        smoother.pushFix(fix);
+        return;
+      }
+    };
+    pullFix();
+    const fixTimer = setInterval(pullFix, 1000);
+
+    // A real gesture pauses the follow; our own jumpTo moves carry no
+    // originalEvent, so the loop can never trip this and cancel itself.
+    const onGesture = (e: { originalEvent?: unknown }) => { if (e?.originalEvent) cockpitGrabRef.current?.(); };
+    map.on('dragstart', onGesture);
+    map.on('zoomstart', onGesture);
+    map.on('rotatestart', onGesture);
+    map.on('pitchstart', onGesture);
+
+    let raf = 0;
+    const frame = () => {
+      raf = requestAnimationFrame(frame);
+      if (!lostFired && Date.now() - lastSeenMs > LOST_GRACE_MS) {
+        lostFired = true;
+        cockpitLostRef.current?.('lost');
+      }
+      const pose = smoother.sample(Date.now());
+      if (!pose) return;
+      try {
+        const src = map.getSource('cockpit-plane') as maplibregl.GeoJSONSource | undefined;
+        if (src) {
+          src.setData({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [pose.lng, pose.lat] },
+            properties: { heading: Math.round(pose.bearingDeg), icon },
+          } as never);
+        }
+        if (locked) {
+          map.jumpTo({
+            center: [pose.lng, pose.lat],
+            bearing: pose.bearingDeg,
+            zoom: COCKPIT_ZOOM,
+            pitch: COCKPIT_PITCH,
+          });
+        }
+      } catch { /* map mid-teardown */ }
+    };
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      cockpitActiveRef.current = false;
+      cancelAnimationFrame(raf);
+      clearInterval(fixTimer);
+      map.off('dragstart', onGesture);
+      map.off('zoomstart', onGesture);
+      map.off('rotatestart', onGesture);
+      map.off('pitchstart', onGesture);
+      FLIGHT_LAYERS.forEach(id => {
+        if (map.getLayer(id)) {
+          try { map.setFilter(id, null as never); } catch { /* style not settled */ }
+        }
+      });
+      try { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); } catch { /* mid-teardown */ }
+      try {
+        const src = map.getSource('cockpit-plane') as maplibregl.GeoJSONSource | undefined;
+        if (src) src.setData(EMPTY_FC as never);
+      } catch { /* mid-teardown */ }
+    };
+  }, [mapReady, cockpitTarget]);
 
   // ── FOLLOW MODE ──
   useEffect(() => {

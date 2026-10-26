@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useReducer, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home, ArrowLeft } from 'lucide-react';
@@ -12,6 +12,7 @@ import { decodeShareView, type SharedView } from '@/lib/share-view';
 import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpeningTarget, writeLastView, type GeoLocation, type LastView } from '@/lib/opening-view';
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
 import { createViewHistory } from '@/lib/view-history';
+import { COCKPIT_IDLE, cockpitReducer } from '@/lib/cockpit';
 import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
@@ -20,6 +21,7 @@ import SearchBar from '@/components/SearchBar';
 import DirectionsBar, { type RouteResult, type LiveLocation, type TripPlan } from '@/components/DirectionsBar';
 import NavigationView from '@/components/NavigationView';
 import FlightWatchPanel, { type WatchedFlight, type FlightTelemetry, type AircraftDetail, type Airport } from '@/components/FlightWatchPanel';
+import CockpitPanel, { CockpitEndedNotice, type CockpitFlightRecord } from '@/components/CockpitPanel';
 import { stopsAhead, type NavProgress } from '@/lib/navigation';
 import type { TransitStatus } from '@/lib/transit-layer';
 import type { LiveDetection } from '@/lib/malware-intel';
@@ -303,6 +305,11 @@ export default function Dashboard() {
   >(null);
   const [navProgress, setNavProgress] = useState<NavProgress | null>(null);
   const [watchedFlights, setWatchedFlights] = useState<WatchedFlight[]>([]);
+  /* Cockpit view (lib/cockpit): the ride's state machine. The map owns the
+     follow camera; this owns entry, exit, and the view to come back to. */
+  const [cockpitState, dispatchCockpit] = useReducer(cockpitReducer, COCKPIT_IDLE);
+  const mapViewRef = useRef(mapView);
+  useEffect(() => { mapViewRef.current = mapView; }, [mapView]);
   const [aircraftAirports, setAircraftAirports] = useState<Record<string, Airport[]>>({});
 
   // The popup lives in raw map HTML, so it hands aircraft over through a global.
@@ -351,6 +358,84 @@ export default function Dashboard() {
     }
     return out;
   }, [watchedFlights, data]);
+
+  // ── COCKPIT ── enter from the map popup, a watch row, or a roster hop.
+  // The saved view is the settled view at entry; exit flies straight back
+  // to it, so a ride never costs the visitor their place on the map.
+  const cockpitStateRef = useRef(cockpitState);
+  useEffect(() => { cockpitStateRef.current = cockpitState; }, [cockpitState]);
+
+  const enterCockpit = useCallback((f: { icao24: string; callsign?: string }) => {
+    if (!f?.icao24) return;
+    const mv = mapViewRef.current;
+    dispatchCockpit({
+      type: 'ENTER',
+      target: { icao24: f.icao24, callsign: (f.callsign || f.icao24.toUpperCase()).trim() },
+      savedView: { lat: mv.latitude, lng: mv.longitude, zoom: mv.zoom, bearing: mv.bearing, pitch: mv.pitch },
+    });
+  }, []);
+
+  // The popup lives in raw map HTML, so it hands aircraft over through a global.
+  useEffect(() => {
+    (window as unknown as { osirisRideFlight?: (f: WatchedFlight) => void }).osirisRideFlight = enterCockpit;
+  }, [enterCockpit]);
+
+  const exitCockpit = useCallback(() => {
+    const st = cockpitStateRef.current;
+    if (st.status !== 'riding') return;
+    dispatchCockpit({ type: 'EXIT' });
+    const sv = st.savedView;
+    setFlyToLocation({ lat: sv.lat, lng: sv.lng, zoom: sv.zoom, bearing: sv.bearing, pitch: sv.pitch, duration: 1800, ts: Date.now() });
+  }, []);
+
+  const handleCockpitGrab = useCallback(() => dispatchCockpit({ type: 'GRAB' }), []);
+  const handleCockpitLost = useCallback((reason: 'landed' | 'lost') => {
+    dispatchCockpit({
+      type: 'LOST',
+      notice: reason === 'landed'
+        ? 'That flight has landed — the ride is over.'
+        : 'That flight has left the live feed — the ride is over.',
+    });
+  }, []);
+
+  const cockpitTargetProp = useMemo(
+    () => (cockpitState.status === 'riding'
+      ? { icao24: cockpitState.target.icao24, locked: cockpitState.lock === 'follow' }
+      : null),
+    [cockpitState],
+  );
+
+  // The ridden aircraft's live record, from the same buckets the watch
+  // panel reads — plus the whole feed, for the nearby-flights roster.
+  const flightBuckets = useMemo(
+    () => [data?.commercial_flights, data?.private_flights, data?.private_jets, data?.military_flights],
+    [data],
+  );
+  const allFlights = useMemo(
+    () => flightBuckets.flatMap((b) => b || []),
+    [flightBuckets],
+  );
+  const cockpitRecord: CockpitFlightRecord | null = useMemo(() => {
+    if (cockpitState.status !== 'riding') return null;
+    const f = allFlights.find((x: { icao24?: string }) => x?.icao24 === cockpitState.target.icao24);
+    if (!f) return null;
+    return {
+      icao24: f.icao24, callsign: f.callsign, model: f.model,
+      lat: f.lat, lng: f.lng, alt: f.alt,
+      speed_knots: f.speed_knots, heading: f.heading,
+      grounded: f.grounded, squawk: f.squawk,
+    };
+  }, [cockpitState, allFlights]);
+
+  // A ride that ends itself flies home at once; the notice explains why
+  // and dismisses itself shortly after.
+  useEffect(() => {
+    if (cockpitState.status !== 'ended') return;
+    const sv = cockpitState.savedView;
+    setFlyToLocation({ lat: sv.lat, lng: sv.lng, zoom: sv.zoom, bearing: sv.bearing, pitch: sv.pitch, duration: 1800, ts: Date.now() });
+    const t = setTimeout(() => dispatchCockpit({ type: 'ACK' }), 6500);
+    return () => clearTimeout(t);
+  }, [cockpitState]);
 
   // A navigation session owns its own position watch. The planner's watch dies
   // with the planner when guidance takes over the panel, so guidance cannot
@@ -1499,6 +1584,16 @@ export default function Dashboard() {
     return () => { intervals.forEach(clearInterval); stopFns.forEach(stop => stop()); };
   }, [activeLayers, fetchEndpoint]);
 
+  // The standing flights poll is five minutes — far too stale to ride on.
+  // While a ride is on, refresh the feed every 30 s (the route serves its
+  // cached sweep, so this is a cheap read, not a new sweep each time).
+  useEffect(() => {
+    if (cockpitState.status !== 'riding') return;
+    fetchEndpoint('/api/flights', normalizeFlightPayload);
+    const iv = setInterval(() => fetchEndpoint('/api/flights', normalizeFlightPayload), 30000);
+    return () => clearInterval(iv);
+  }, [cockpitState.status, fetchEndpoint]);
+
   /* ── LIVE MALWARE — pushed over SSE while the layer is on ──
      Detections arrive when URLhaus reports them rather than on a timer, so
      there is no poll interval to tune and no request that re-downloads the
@@ -1927,6 +2022,9 @@ export default function Dashboard() {
           }
           followUser={followUser}
           onFollowInterrupt={() => setFollowUser(false)}
+          cockpitTarget={cockpitTargetProp}
+          onCockpitGrab={handleCockpitGrab}
+          onCockpitLost={handleCockpitLost}
           navigating={Boolean(navSession)}
           drawMode={drawMode}
           onDrawProgress={setDrawProgress}
@@ -2051,8 +2149,33 @@ export default function Dashboard() {
             onRemove={removeWatched}
             onLocate={(lat, lng) => setFlyToLocation({ lat, lng, zoom: 8, ts: Date.now() })}
             onDetail={handleAircraftDetail}
+            onRide={enterCockpit}
           />
         </motion.div>
+      )}
+
+      {/* ── COCKPIT ── */}
+      {cockpitState.status === 'riding' && (
+        <div data-hud className="absolute bottom-[86px] md:bottom-[112px] left-1/2 -translate-x-1/2 z-[380] w-[min(94vw,600px)] pointer-events-auto">
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }}>
+            <CockpitPanel
+              target={cockpitState.target}
+              flight={cockpitRecord}
+              lock={cockpitState.lock}
+              flights={allFlights}
+              onHop={enterCockpit}
+              onRecenter={() => dispatchCockpit({ type: 'RECENTER' })}
+              onExit={exitCockpit}
+            />
+          </motion.div>
+        </div>
+      )}
+      {cockpitState.status === 'ended' && (
+        <div data-hud className="absolute bottom-[86px] md:bottom-[112px] left-1/2 -translate-x-1/2 z-[380] w-[min(94vw,600px)] pointer-events-auto">
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }}>
+            <CockpitEndedNotice notice={cockpitState.notice} onDismiss={() => dispatchCockpit({ type: 'ACK' })} />
+          </motion.div>
+        </div>
       )}
 
       {/* ── MAP VIEW CONTROLS ── */}

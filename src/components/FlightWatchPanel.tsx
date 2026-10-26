@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Plane, Gauge, ArrowUp, Radio, Crosshair, Loader2 } from 'lucide-react';
+import { X, Plane, Gauge, ArrowUp, Radio, Crosshair, Loader2, Navigation } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
    OSIRIS — Flight Watch
@@ -132,6 +132,8 @@ interface FlightWatchPanelProps {
   onLocate: (lat: number, lng: number) => void;
   /** Resolved identity + flown track, so the map can draw each path. */
   onDetail: (icao24: string, detail: AircraftDetail | null) => void;
+  /** Ride along with this aircraft in the cockpit view. */
+  onRide?: (flight: WatchedFlight) => void;
 }
 
 /** Feet is what aviation actually uses; the feed reports metres. */
@@ -145,12 +147,13 @@ export function formatAlt(metres: number | undefined, grounded?: boolean): strin
   return `${toFeet(metres).toLocaleString()} ft`;
 }
 
-function Row({ flight, telem, onRemove, onLocate, onDetail }: {
+function Row({ flight, telem, onRemove, onLocate, onDetail, onRide }: {
   flight: WatchedFlight;
   telem?: FlightTelemetry;
   onRemove: (icao24: string) => void;
   onLocate: (lat: number, lng: number) => void;
   onDetail: (icao24: string, d: AircraftDetail | null) => void;
+  onRide?: (flight: WatchedFlight) => void;
 }) {
   const [detail, setDetail] = useState<AircraftDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -200,6 +203,16 @@ function Row({ flight, telem, onRemove, onLocate, onDetail }: {
             className="p-0.5 text-[var(--text-muted)] hover:text-[var(--cyan-primary)] transition-colors"
           >
             <Crosshair className="w-3 h-3" />
+          </button>
+        )}
+        {onRide && (
+          <button
+            onClick={() => onRide(flight)}
+            title="Ride along in the cockpit"
+            aria-label={`Ride along with ${flight.callsign || flight.icao24} in the cockpit`}
+            className="p-0.5 text-[var(--text-muted)] hover:text-[var(--cyan-primary)] transition-colors"
+          >
+            <Navigation className="w-3 h-3" />
           </button>
         )}
         <button
@@ -284,7 +297,7 @@ function Row({ flight, telem, onRemove, onLocate, onDetail }: {
 }
 
 export default function FlightWatchPanel({
-  watched, telemetry, onRemove, onLocate, onDetail,
+  watched, telemetry, onRemove, onLocate, onDetail, onRide,
 }: FlightWatchPanelProps) {
   if (watched.length === 0) return null;
 
@@ -298,6 +311,7 @@ export default function FlightWatchPanel({
           onRemove={onRemove}
           onLocate={onLocate}
           onDetail={onDetail}
+          onRide={onRide}
         />
       ))}
     </div>
