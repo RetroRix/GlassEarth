@@ -104,11 +104,19 @@ export function onCorridor(here: [number, number], origin: Airport, destination:
 export function resolveEndpoints(
   ac: AircraftDetail,
   schedule: ScheduledRoute | null,
+  /** The aircraft's position from the LIVE feed, when the caller has one.
+   *  The corridor test needs a "here"; the trace used to be the only source
+   *  of it, so when the trace lookup comes back empty (or the airframe is
+   *  unknown to it) every schedule was discarded uncorroborated — the
+   *  cockpit OSD showed no route and drew no line for flights whose route
+   *  was perfectly well known. The live position is the same fact from a
+   *  fresher source, so callers that hold it may stand it in. */
+  hereOverride?: [number, number] | null,
 ): { origin: Airport | null; destination: Airport | null } {
   const observedDep = ac.departure || null;
   const observedArr = ac.arrival || null;
   const sched = schedule?.found ? schedule : null;
-  const here = ac.track.length ? ac.track[ac.track.length - 1] : null;
+  const here = hereOverride ?? (ac.track.length ? ac.track[ac.track.length - 1] : null);
 
   // Already landed: both ends were watched happening, nothing to corroborate.
   if (observedDep && observedArr) return { origin: observedDep, destination: observedArr };

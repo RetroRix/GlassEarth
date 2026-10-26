@@ -3,6 +3,7 @@ import {
   FLIGHT_RETRY_DELAYS_MS,
   FLIGHT_STALE_REFETCH_ATTEMPTS,
   FLIGHT_STALE_REFETCH_MS,
+  flightsForRide,
   hasFlightData,
   isPartialFlightPayload,
   isStaleFlightPayload,
@@ -10,6 +11,7 @@ import {
   FLIGHT_SWEEP_DEADLINE_MS,
   isStaleSweepPromise,
   normalizeFlightPayload,
+  recordForRide,
 } from './flight-load';
 
 describe('nextFlightRetryDelay', () => {
@@ -81,5 +83,50 @@ describe('isStaleSweepPromise', () => {
     expect(isStaleSweepPromise(1_000, 60_000)).toBe(false);
     expect(isStaleSweepPromise(1_000, 66_001)).toBe(true);
     expect(isStaleSweepPromise(1_000, 66_000)).toBe(false);
+  });
+});
+
+/* ── The 2026-10-26 fix: a ride must survive a partial sweep ── */
+
+describe('recordForRide', () => {
+  const held = { icao24: 'abc123', alt: 35_000 };
+  const current = { icao24: 'abc123', alt: 36_000 };
+
+  it('prefers the current record whenever the feed has it', () => {
+    expect(recordForRide(current, held, true)).toBe(current);
+    expect(recordForRide(current, held, false)).toBe(current);
+    expect(recordForRide(current, null, true)).toBe(current);
+  });
+
+  it('holds the last record through a partial payload — absence there is no data', () => {
+    expect(recordForRide(null, held, true)).toBe(held);
+    expect(recordForRide(undefined, held, true)).toBe(held);
+  });
+
+  it('a complete payload is allowed to say the aircraft is gone', () => {
+    expect(recordForRide(null, held, false)).toBeNull();
+    expect(recordForRide(null, null, true)).toBeNull();
+  });
+});
+
+describe('flightsForRide', () => {
+  const a = { icao24: 'a', alt: 1 };
+  const b = { icao24: 'b', alt: 2 };
+  const c = { icao24: 'c', alt: 3 };
+
+  it('returns the current rows untouched outside a partial payload', () => {
+    expect(flightsForRide([a], [a, b, c], false)).toEqual([a]);
+  });
+
+  it('merges held rows under the partial rows, current winning per aircraft', () => {
+    const aFresh = { icao24: 'a', alt: 99 };
+    const merged = flightsForRide([aFresh], [a, b, c], true);
+    expect(merged).toHaveLength(3);
+    expect(merged.find(f => f.icao24 === 'a')?.alt).toBe(99);
+    expect(merged.map(f => f.icao24).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('with nothing held, the partial rows stand alone', () => {
+    expect(flightsForRide([a], [], true)).toEqual([a]);
   });
 });

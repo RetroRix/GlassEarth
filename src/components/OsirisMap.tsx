@@ -14,8 +14,8 @@ import { createSatelliteLayer, parseColor, SAT_MAX_ZOOM, type SatPoint } from '@
 import { MAP_DEFAULTS, MAP_PALETTE_KEYS, readMapPalette, satColorFor, type MapPalette } from '@/lib/map-palette';
 import { CAMERA_SETTLE_MS, cameraGhostFadeMs, cameraGhostPaint, cameraGhostState, type CameraGhostState } from '@/lib/camera-ghosting';
 import {
-  COCKPIT_PITCH, COCKPIT_TOP_PADDING_FRACTION, COCKPIT_ZOOM, LOST_GRACE_MS,
-  createFollowSmoother, mapPopupsAllowed, type CockpitFix,
+  COCKPIT_PITCH, COCKPIT_TOP_PADDING_FRACTION, COCKPIT_ZOOM,
+  absenceIsLoss, createFollowSmoother, mapPopupsAllowed, nextAbsenceMs, type CockpitFix,
 } from '@/lib/cockpit';
 import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import { STYLE_EVENT } from '@/lib/style-tokens';
@@ -890,18 +890,27 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // pitched view reads as travelling a route, not chasing a dot. The
       // follow loop rewrites this source every frame.
       map.addSource('cockpit-route', { type: 'geojson', data: EMPTY_FC });
+      /* A dark casing under both segments, the way the directions lines are
+         drawn: at the ride's 76° pitch on the globe a bare 2px line is
+         foreshortened to invisibility (proven in a headless render during
+         the 2026-10-26 fix round) — the casing and the wider, brighter
+         strokes are what make the route read as a route in the FPV frame,
+         over the pale day basemap as much as the dark one. */
+      map.addLayer({ id: 'cockpit-route-casing', type: 'line', source: 'cockpit-route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#001014', 'line-width': 7.5, 'line-opacity': 0.55 } });
       map.addLayer({ id: 'cockpit-route-flown', type: 'line', source: 'cockpit-route',
         filter: ['==', ['get', 'seg'], 'flown'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': 'rgba(255,179,0,0.5)', 'line-width': 2 } });
+        paint: { 'line-color': 'rgba(255,179,0,0.9)', 'line-width': 3.5 } });
       map.addLayer({ id: 'cockpit-route-ahead', type: 'line', source: 'cockpit-route',
         filter: ['==', ['get', 'seg'], 'ahead'],
         layout: { 'line-cap': 'round' },
-        paint: { 'line-color': 'rgba(255,179,0,0.95)', 'line-width': 2.5, 'line-dasharray': [2, 1.4] } });
+        paint: { 'line-color': 'rgba(255,179,0,0.95)', 'line-width': 4, 'line-dasharray': [2, 1.4] } });
       map.addLayer({ id: 'cockpit-route-dest', type: 'circle', source: 'cockpit-route',
         filter: ['==', ['get', 'seg'], 'dest'],
-        paint: { 'circle-radius': 6, 'circle-color': 'rgba(255,179,0,0.25)',
-          'circle-stroke-width': 2, 'circle-stroke-color': '#FFB300' } });
+        paint: { 'circle-radius': 8, 'circle-color': 'rgba(255,179,0,0.35)',
+          'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFB300' } });
 
       map.addSource('cockpit-plane', { type: 'geojson', data: EMPTY_FC });
       map.addLayer({ id: 'cockpit-plane-ring', type: 'circle', source: 'cockpit-plane', paint: {
@@ -3044,7 +3053,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const start = map.getCenter();
     const smoother = createFollowSmoother({ lat: start.lat, lng: start.lng, bearingDeg: map.getBearing() });
     let icon = 'plane-cyan';
-    let lastSeenMs = Date.now();
+    /* Absence from COMPLETE payloads only, accumulated per pullFix tick —
+       a partial first-wave payload does not contain most of the sky, so
+       absence from it is no-new-data and must not age the target toward
+       "lost" (lib/cockpit's absence accounting; the 2026-10-26 fix). */
+    let absenceMs = 0;
     let wasAirborne = false;
     let lostFired = false;
 
@@ -3054,7 +3067,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const d = dataRef.current as {
         commercial_flights?: FeedRow[]; private_flights?: FeedRow[];
         private_jets?: FeedRow[]; military_flights?: FeedRow[];
+        partial?: unknown;
       } | null;
+      const partialNow = d?.partial === true;
       const buckets: Array<[FeedRow[] | undefined, string]> = [
         [d?.commercial_flights, 'plane-cyan'],
         [d?.private_flights, 'plane-green'],
@@ -3064,7 +3079,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       for (const [arr, bucketIcon] of buckets) {
         const f = (arr || []).find((x) => x?.icao24 === icao);
         if (!f || !Number.isFinite(f.lat) || !Number.isFinite(f.lng)) continue;
-        lastSeenMs = Date.now();
+        absenceMs = nextAbsenceMs(absenceMs, true, partialNow, 1000);
         icon = bucketIcon;
         if (!f.grounded) wasAirborne = true;
         if (f.grounded && wasAirborne && !lostFired) {
@@ -3082,6 +3097,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         smoother.pushFix(fix);
         return;
       }
+      absenceMs = nextAbsenceMs(absenceMs, false, partialNow, 1000);
     };
     pullFix();
     const fixTimer = setInterval(pullFix, 1000);
@@ -3097,7 +3113,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     let raf = 0;
     const frame = () => {
       raf = requestAnimationFrame(frame);
-      if (!lostFired && Date.now() - lastSeenMs > LOST_GRACE_MS) {
+      if (!lostFired && absenceIsLoss(absenceMs)) {
         lostFired = true;
         cockpitLostRef.current?.('lost');
       }

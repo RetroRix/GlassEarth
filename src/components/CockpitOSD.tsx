@@ -15,6 +15,9 @@ import {
   contactsPanelReducer,
   nearbyChipLabel,
   routeGeometryFromDetail,
+  appendObservedPoint,
+  pickRouteTrack,
+  rideRouteText,
   EMPTY_ROUTE_GEOMETRY,
   type CockpitRouteGeometry,
 } from '@/lib/cockpit-osd';
@@ -55,6 +58,9 @@ interface CockpitOSDProps {
   target: CockpitTarget;
   /** The target's latest feed record; null during a gap in coverage. */
   flight: CockpitFlightRecord | null;
+  /** True when `flight` is the last record seen before a partial feed sweep
+   *  (the page holds it rather than blanking the OSD — see flight-load). */
+  flightHeld?: boolean;
   lock: 'follow' | 'free';
   /** The whole feed, for the nearby-flights roster. */
   flights: ContactFlight[];
@@ -89,7 +95,7 @@ const VALUE: CSSProperties = { fontSize: 13, lineHeight: 1.15 };
 const ROUTE_REFRESH_MS = 90_000;
 
 export default function CockpitOSD({
-  target, flight, lock, flights, onHop, onRecenter, onExit, onRouteGeometry,
+  target, flight, flightHeld = false, lock, flights, onHop, onRecenter, onExit, onRouteGeometry,
 }: CockpitOSDProps) {
   /* The resolved detail plus the aircraft it belongs to — a hop swaps the
      target, and a slow lookup for the old plane must not land on the new
@@ -99,10 +105,41 @@ export default function CockpitOSD({
   const [contactsOpen, dispatchContacts] = useReducer(contactsPanelReducer, false);
   const detail = resolved && resolved.icao24 === target.icao24 ? resolved.detail : null;
 
+  /* The aircraft's live position, for corroborating its schedule when the
+     trace lookup cannot (see resolveEndpoints' hereOverride). */
+  const hereRef = useRef<[number, number] | null>(null);
+  useEffect(() => {
+    if (flight) hereRef.current = [flight.lng, flight.lat];
+  }, [flight]);
+
+  /* The ride's own observed trail — the positions the feed has reported
+     for this aircraft since the ride began. It is the drawn track when
+     the trace lookup yields nothing (see appendObservedPoint). Kept with
+     React's previous-props pattern — adjusted during render, not in an
+     effect — because the trail is a pure function of the props seen so
+     far: a new target starts it over, each new feed record extends it. */
+  const [trail, setTrail] = useState<{
+    icao24: string; seen: CockpitFlightRecord | null; points: [number, number][];
+  }>({ icao24: target.icao24, seen: null, points: [] });
+  if (trail.icao24 !== target.icao24 || (flight !== null && trail.seen !== flight)) {
+    const basePoints = trail.icao24 === target.icao24 ? trail.points : [];
+    setTrail({
+      icao24: target.icao24,
+      seen: flight,
+      points: flight ? appendObservedPoint(basePoints, [flight.lng, flight.lat]) : basePoints,
+    });
+  }
+  const observed = trail.icao24 === target.icao24 ? trail.points : EMPTY_ROUTE_GEOMETRY.track;
+
   /* Airframe + route, the same two lookups the watch panel makes: the trace
      files know what the aircraft is and where it was seen to leave, the
      route lookup knows the schedule — and the schedule is only believed
-     when it agrees with what was observed (resolveEndpoints). */
+     when it agrees with what was observed (resolveEndpoints). When the
+     trace side knows nothing at all, the endpoints are still resolved
+     against an empty shell with the live position standing in for the
+     track: a corroborated destination is real information about where
+     this flight is going, and dropping it with the failed lookup left
+     the OSD showing no route for flights whose route was known. */
   useEffect(() => {
     let cancelled = false;
     const cs = (target.callsign || '').replace(/\s+/g, '');
@@ -116,9 +153,13 @@ export default function CockpitOSD({
     ]).then(([ac, route]) => {
       if (cancelled) return;
       const base = ac && !ac.error ? (ac as AircraftDetail) : null;
+      const shell: AircraftDetail = base ?? {
+        icao24: target.icao24, registration: null, typeCode: null, model: null,
+        operator: null, track: [], points: 0, departure: null, arrival: null,
+      };
       setResolved({
         icao24: target.icao24,
-        detail: base ? { ...base, ...resolveEndpoints(base, route as ScheduledRoute | null) } : null,
+        detail: { ...shell, ...resolveEndpoints(shell, route as ScheduledRoute | null, hereRef.current) },
       });
     });
     return () => { cancelled = true; };
@@ -132,8 +173,14 @@ export default function CockpitOSD({
 
   /* Report the drawable route to the page (which hands it to the map).
      The geometry empties the moment the target changes — the line under
-     the nose is always this aircraft's, never the previous one's. */
-  const geometry = useMemo(() => routeGeometryFromDetail(detail), [detail]);
+     the nose is always this aircraft's, never the previous one's. The
+     drawn track is the trace's when it resolved, the ride's own observed
+     trail when it didn't. */
+  const geometry = useMemo(() => {
+    const g = routeGeometryFromDetail(detail);
+    const track = pickRouteTrack(g.track, observed);
+    return track === g.track ? g : { ...g, track };
+  }, [detail, observed]);
   const geometryRef = useRef(onRouteGeometry);
   useEffect(() => { geometryRef.current = onRouteGeometry; }, [onRouteGeometry]);
   useEffect(() => {
@@ -156,6 +203,7 @@ export default function CockpitOSD({
 
   const callsign = (flight?.callsign || target.callsign || target.icao24.toUpperCase()).trim();
   const headingDeg = flight ? Math.round(((flight.heading || 0) % 360 + 360) % 360) : null;
+  const routeText = rideRouteText(detail);
 
   const hop = (c: ContactFlight) => {
     dispatchContacts('HOP');
@@ -171,15 +219,15 @@ export default function CockpitOSD({
           <span className="ml-2 text-[9px] tabular-nums" style={{ color: 'rgba(232,230,224,0.55)' }}>
             {target.icao24.toUpperCase()}
           </span>
-          {(detail?.origin || detail?.destination) && (
+          {routeText && (
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] tabular-nums">
-              <span>{detail.origin ? detail.origin.iata || detail.origin.icao : '····'}</span>
+              <span>{routeText.originLabel}</span>
               <span style={{ color: 'rgba(232,230,224,0.55)' }}>&rarr;</span>
-              <span>{detail.destination ? detail.destination.iata || detail.destination.icao : '····'}</span>
+              <span>{routeText.destinationLabel}</span>
               {/* Same honesty rule as the watch panel: an unconfirmed
                   destination is a schedule claim, not an observation. */}
               <span className="text-[8px]" style={{ color: 'rgba(232,230,224,0.55)' }}>
-                {detail.arrival ? 'landed' : detail.destination ? 'scheduled' : 'destination unknown'}
+                {routeText.state === 'landed' ? 'landed' : routeText.state === 'scheduled' ? 'scheduled' : 'destination unknown'}
               </span>
             </div>
           )}
@@ -187,6 +235,11 @@ export default function CockpitOSD({
         {!flight && (
           <div style={{ ...PILL, color: 'var(--alert-orange)', fontSize: 10 }}>
             Waiting for the next position report…
+          </div>
+        )}
+        {flight && flightHeld && (
+          <div style={{ ...PILL, color: 'var(--alert-orange)', fontSize: 9, letterSpacing: '0.08em' }}>
+            FEED GAP — SHOWING LAST REPORT
           </div>
         )}
       </div>

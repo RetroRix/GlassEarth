@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
+  appendObservedPoint,
   cardinalFor,
   contactsPanelReducer,
   nearbyChipLabel,
+  pickRouteTrack,
+  rideRouteText,
   routeGeometryFromDetail,
   routeLineFeatures,
   EMPTY_ROUTE_GEOMETRY,
+  OBSERVED_MAX_POINTS,
   type CockpitRouteGeometry,
 } from './cockpit-osd';
 import type { AircraftDetail } from '@/components/FlightWatchPanel';
@@ -130,5 +134,81 @@ describe('nearbyChipLabel', () => {
   it('counts the contacts on the chip', () => {
     expect(nearbyChipLabel(1)).toBe('NEARBY · 1');
     expect(nearbyChipLabel(7)).toBe('NEARBY · 7');
+  });
+});
+
+/* ── The 2026-10-26 fix: the ride draws its own trail when the trace
+   lookup yields nothing, and the OSD route text is derivable headlessly ── */
+
+describe('appendObservedPoint', () => {
+  const A: [number, number] = [-106.4, 31.7];
+  const B: [number, number] = [-106.2, 31.8]; // ~21 km from A
+  const nearA: [number, number] = [-106.399, 31.7]; // ~90 m from A
+
+  it('starts the trail and appends moved positions', () => {
+    expect(appendObservedPoint([], A)).toEqual([A]);
+    expect(appendObservedPoint([A], B)).toEqual([A, B]);
+  });
+
+  it('ignores sub-spacing jitter and returns the same array (no re-render churn)', () => {
+    const t = appendObservedPoint([], A);
+    expect(appendObservedPoint(t, nearA)).toBe(t);
+  });
+
+  it('ignores non-finite positions', () => {
+    const t = appendObservedPoint([], A);
+    expect(appendObservedPoint(t, [Number.NaN, 31.7])).toBe(t);
+  });
+
+  it('caps the trail, dropping the oldest points', () => {
+    let t: [number, number][] = [];
+    for (let i = 0; i < OBSERVED_MAX_POINTS + 5; i++) {
+      t = appendObservedPoint(t, [-106 + i * 0.01, 31.7], 0);
+    }
+    expect(t).toHaveLength(OBSERVED_MAX_POINTS);
+    expect(t[0][0]).toBeCloseTo(-106 + 5 * 0.01, 6);
+  });
+});
+
+describe('pickRouteTrack', () => {
+  const trace: [number, number][] = [[-106.4, 31.7], [-106.2, 31.8]];
+  const observed: [number, number][] = [[-106.3, 31.75], [-106.25, 31.77]];
+
+  it('prefers a real trace', () => {
+    expect(pickRouteTrack(trace, observed)).toBe(trace);
+  });
+
+  it('falls back to the observed trail when the trace is missing or a single point', () => {
+    expect(pickRouteTrack([], observed)).toBe(observed);
+    expect(pickRouteTrack([trace[0]], observed)).toBe(observed);
+  });
+});
+
+describe('rideRouteText', () => {
+  const DAL = { icao: 'KDAL', iata: 'DAL', city: 'Dallas', lat: 32.847, lng: -96.852 };
+  const LGA = { icao: 'KLGA', iata: 'LGA', city: 'New York', lat: 40.777, lng: -73.874 };
+
+  it('is null when nothing about the route is known', () => {
+    expect(rideRouteText(null)).toBeNull();
+    expect(rideRouteText(detail())).toBeNull();
+  });
+
+  it('shows the corroborated pair as a schedule claim', () => {
+    expect(rideRouteText(detail({ origin: LGA, destination: DAL })))
+      .toEqual({ originLabel: 'LGA', destinationLabel: 'DAL', state: 'scheduled' });
+  });
+
+  it('a destination without an observed origin reads ···· → DAL — the DAL835 shape', () => {
+    expect(rideRouteText(detail({ origin: null, destination: DAL })))
+      .toEqual({ originLabel: '····', destinationLabel: 'DAL', state: 'scheduled' });
+  });
+
+  it('an observed arrival makes it landed', () => {
+    expect(rideRouteText(detail({ origin: LGA, destination: DAL, arrival: DAL }))?.state).toBe('landed');
+  });
+
+  it('an origin alone claims no destination', () => {
+    expect(rideRouteText(detail({ origin: LGA })))
+      .toEqual({ originLabel: 'LGA', destinationLabel: '····', state: 'unknown' });
   });
 });

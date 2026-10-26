@@ -60,6 +60,46 @@ export function isPartialFlightPayload(data: { partial?: unknown } | null | unde
   return data?.partial === true;
 }
 
+/* ── Riding through a partial sweep ──
+   While a cockpit ride is on, the page refreshes the feed every 30 s, and
+   some of those refreshes land on the route's fast first wave — a partial
+   payload that does not contain the ridden aircraft at all. Absence from
+   a partial payload is no information: it must not blank the ride's OSD,
+   empty its contacts roster, or count toward losing the target. These two
+   helpers are the page-side half of that rule (the map-side half is the
+   absence accounting in lib/cockpit). */
+
+/** The record a ride should display: the current one when the feed has it;
+ *  during a partial payload, the last record seen (held, values intact);
+ *  from a complete payload, absence is real and the answer is null. */
+export function recordForRide<T>(
+  current: T | null | undefined,
+  held: T | null | undefined,
+  payloadPartial: boolean,
+): T | null {
+  if (current) return current;
+  return payloadPartial ? (held ?? null) : null;
+}
+
+/** The roster a ride should show during a partial payload: the partial
+ *  rows are the freshest word on the aircraft they include, and the held
+ *  rows keep the rest of the sky from vanishing mid-ride. Outside a
+ *  partial payload the current rows stand alone. Keyed by icao24; rows
+ *  without one cannot be matched and only ever come from `current`. */
+export function flightsForRide<T extends { icao24?: string }>(
+  current: T[],
+  held: T[],
+  payloadPartial: boolean,
+): T[] {
+  if (!payloadPartial || held.length === 0) return current;
+  const byId = new Map<string, T>();
+  for (const f of held) if (f?.icao24) byId.set(f.icao24, f);
+  for (const f of current) if (f?.icao24) byId.set(f.icao24, f);
+  const keyed = [...byId.values()];
+  const unkeyed = current.filter(f => !f?.icao24);
+  return unkeyed.length ? [...keyed, ...unkeyed] : keyed;
+}
+
 export function isStaleFlightPayload(data: { stale?: unknown } | null | undefined): boolean {
   return data?.stale === true;
 }

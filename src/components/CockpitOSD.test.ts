@@ -86,3 +86,29 @@ describe('CockpitOSD — the FPV corner layout', () => {
     expect(html).not.toContain('NEARBY');
   });
 });
+
+/* ── The 2026-10-26 fix: a partial sweep must not blank the ride ──
+   The page holds the last complete-payload record and passes it with
+   flightHeld set; the OSD keeps every value on screen and says so,
+   instead of switching to the waiting state with blank readouts. */
+describe('CockpitOSD — riding through a partial sweep', () => {
+  it('a held record keeps its values and is flagged as a feed gap', () => {
+    const html = render({ flight, flightHeld: true });
+    expect(html).toContain('FEED GAP');
+    expect(html).toContain('32,800 ft');
+    expect(html).toContain('450 kt');
+    expect(html).toContain('304° NW');
+    expect(html).not.toContain('Waiting for the next position report');
+  });
+
+  it('a fresh record shows no gap note', () => {
+    const html = render({ flight, flightHeld: false });
+    expect(html).not.toContain('FEED GAP');
+  });
+
+  it('the waiting state is only for having no record at all', () => {
+    const html = render({ flight: null, flightHeld: true, flights: [] });
+    expect(html).toContain('Waiting for the next position report');
+    expect(html).not.toContain('FEED GAP');
+  });
+});

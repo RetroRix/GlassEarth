@@ -10,6 +10,7 @@
  */
 
 import type { CockpitPose } from './cockpit';
+import { haversineKm } from './cockpit';
 import type { AircraftDetail } from '@/components/FlightWatchPanel';
 
 /** Eight-point cardinal for a heading in degrees. */
@@ -29,6 +30,69 @@ export interface CockpitRouteGeometry {
 }
 
 export const EMPTY_ROUTE_GEOMETRY: CockpitRouteGeometry = { track: [], destination: null };
+
+/**
+ * The flown track the ride itself has observed, point by point.
+ *
+ * The drawn track used to come only from the adsb.lol trace files — and
+ * when that lookup fails (it sits behind a bot-verification wall as of
+ * 2026-10-26, so it fails for every aircraft) the ride drew nothing at
+ * all, even though the live feed was reporting the aircraft's position
+ * the whole time. So the ride also keeps its own trail: every position
+ * the feed reports for the ridden aircraft while the ride is on, spaced
+ * far enough apart to be a path rather than a pile of duplicates. It is
+ * the aircraft's real reported positions — observed, never interpolated.
+ */
+export const OBSERVED_MIN_SPACING_KM = 0.4;
+/** A ride is minutes-to-hours; this caps the trail at a long day's flying. */
+export const OBSERVED_MAX_POINTS = 1000;
+
+export function appendObservedPoint(
+  track: [number, number][],
+  point: [number, number],
+  minSpacingKm: number = OBSERVED_MIN_SPACING_KM,
+): [number, number][] {
+  if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return track;
+  const last = track[track.length - 1];
+  if (last && haversineKm({ lat: last[1], lng: last[0] }, { lat: point[1], lng: point[0] }) < minSpacingKm) {
+    return track;
+  }
+  const next = [...track, point];
+  return next.length > OBSERVED_MAX_POINTS ? next.slice(next.length - OBSERVED_MAX_POINTS) : next;
+}
+
+/**
+ * Which track to draw: the trace's, when it actually resolved (it covers
+ * the leg from departure, denser than anything the ride can gather), and
+ * the ride's own observed trail when it didn't. A one-point trace is no
+ * line at all, so it never shadows the trail.
+ */
+export function pickRouteTrack(
+  traceTrack: [number, number][],
+  observed: [number, number][],
+): [number, number][] {
+  return traceTrack.length >= 2 ? traceTrack : observed;
+}
+
+/** The OSD's route line, derived from a resolved detail — or null when the
+ *  data supports no route at all (neither endpoint known). The label state
+ *  carries the same honesty as the watch panel: an observed arrival is
+ *  'landed', an accepted destination is a schedule claim, and with only an
+ *  origin there is nothing to claim. */
+export interface RideRouteText {
+  originLabel: string;
+  destinationLabel: string;
+  state: 'landed' | 'scheduled' | 'unknown';
+}
+
+export function rideRouteText(detail: AircraftDetail | null): RideRouteText | null {
+  if (!detail || (!detail.origin && !detail.destination)) return null;
+  return {
+    originLabel: detail.origin ? detail.origin.iata || detail.origin.icao : '····',
+    destinationLabel: detail.destination ? detail.destination.iata || detail.destination.icao : '····',
+    state: detail.arrival ? 'landed' : detail.destination ? 'scheduled' : 'unknown',
+  };
+}
 
 /**
  * Pull the drawable route out of a resolved aircraft detail: the reported

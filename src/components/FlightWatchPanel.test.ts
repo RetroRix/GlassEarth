@@ -138,4 +138,40 @@ describe('resolveEndpoints', () => {
     );
     expect(destination).toBeNull();
   });
+
+  /* The 2026-10-26 failure: the trace lookup came back empty for every
+     aircraft, so this used to return nothing no matter what the schedule
+     said — the cockpit OSD showed no route for flights whose route was
+     known. The live feed position stands in for the missing track. */
+  it('corroborates the schedule from the live position when there is no track at all', () => {
+    // DAL835's shape: LGA → RSW, last reported just off the Florida coast
+    // on the LGA→RSW line — the schedule's destination is believed.
+    const RSW = ap('KRSW', 'RSW', 26.5362, -81.7552);
+    const LGA = ap('KLGA', 'LGA', 40.7769, -73.8740);
+    const { origin, destination } = resolveEndpoints(
+      detail({ track: [], points: 0, departure: null }),
+      { found: true, origin: LGA, destination: RSW },
+      [-81.9, 27.4],
+    );
+    expect(origin).toBeNull();
+    expect(destination?.iata).toBe('RSW');
+  });
+
+  it('still rejects an uncorroborated schedule when the live position is off its corridor', () => {
+    const { destination } = resolveEndpoints(
+      detail({ track: [], points: 0, departure: null }),
+      { found: true, origin: CLE, destination: DTW },
+      [-111.98, 40.79], // over Utah — nowhere near CLE→DTW
+    );
+    expect(destination).toBeNull();
+  });
+
+  it('without a live position either, an empty track still corroborates nothing', () => {
+    const { destination } = resolveEndpoints(
+      detail({ track: [], points: 0, departure: null }),
+      { found: true, origin: DTW, destination: FLL },
+      null,
+    );
+    expect(destination).toBeNull();
+  });
 });

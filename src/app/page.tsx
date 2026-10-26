@@ -7,7 +7,7 @@ import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satel
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
-import { FLIGHT_STALE_REFETCH_ATTEMPTS, FLIGHT_STALE_REFETCH_MS, hasFlightData, isPartialFlightPayload, isStaleFlightPayload, nextFlightRetryDelay, normalizeFlightPayload, type FlightFeedStatus } from '@/lib/flight-load';
+import { FLIGHT_STALE_REFETCH_ATTEMPTS, FLIGHT_STALE_REFETCH_MS, flightsForRide, hasFlightData, isPartialFlightPayload, isStaleFlightPayload, nextFlightRetryDelay, normalizeFlightPayload, recordForRide, type FlightFeedStatus } from '@/lib/flight-load';
 import { decodeShareView, type SharedView } from '@/lib/share-view';
 import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpeningTarget, writeLastView, type GeoLocation, type LastView } from '@/lib/opening-view';
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
@@ -434,6 +434,40 @@ export default function Dashboard() {
       grounded: f.grounded, squawk: f.squawk,
     };
   }, [cockpitState, allFlights]);
+
+  /* Riding through a partial sweep (lib/flight-load): the feed's fast
+     first wave is flagged partial and does not contain most of the sky,
+     the ridden aircraft included. Absence from a partial payload is
+     no-new-data — the OSD keeps the last record seen in a complete
+     payload (values intact, flagged as held) and the roster keeps the
+     held sky merged under the partial's fresher rows, instead of the
+     ride blanking and stalling the way the 2026-10-26 verification
+     watched it do. Only a complete payload may declare the target gone. */
+  const heldRecordRef = useRef<CockpitFlightRecord | null>(null);
+  const heldFlightsRef = useRef<typeof allFlights>([]);
+  const flightsPartialNow = isPartialFlightPayload(data);
+  useEffect(() => {
+    if (cockpitState.status !== 'riding') {
+      heldRecordRef.current = null;
+      heldFlightsRef.current = [];
+      return;
+    }
+    if (!flightsPartialNow) {
+      heldFlightsRef.current = allFlights;
+      if (cockpitRecord) heldRecordRef.current = cockpitRecord;
+    }
+  }, [cockpitState, allFlights, cockpitRecord, flightsPartialNow]);
+  const heldForTarget = cockpitState.status === 'riding'
+    && heldRecordRef.current?.icao24 === cockpitState.target.icao24
+    ? heldRecordRef.current
+    : null;
+  const osdFlight = cockpitState.status === 'riding'
+    ? recordForRide(cockpitRecord, heldForTarget, flightsPartialNow)
+    : null;
+  const flightHeld = osdFlight !== null && cockpitRecord === null;
+  const osdFlights = cockpitState.status === 'riding'
+    ? flightsForRide(allFlights, heldFlightsRef.current, flightsPartialNow)
+    : allFlights;
 
   // A ride that ends itself flies home at once; the notice explains why
   // and dismisses itself shortly after.
@@ -2175,9 +2209,10 @@ export default function Dashboard() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }} className="absolute inset-0">
             <CockpitOSD
               target={cockpitState.target}
-              flight={cockpitRecord}
+              flight={osdFlight}
+              flightHeld={flightHeld}
               lock={cockpitState.lock}
-              flights={allFlights}
+              flights={osdFlights}
               onHop={enterCockpit}
               onRecenter={() => dispatchCockpit({ type: 'RECENTER' })}
               onExit={exitCockpit}

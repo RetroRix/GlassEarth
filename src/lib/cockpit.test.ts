@@ -5,6 +5,7 @@ import {
   COCKPIT_ZOOM,
   CONTACT_RADIUS_KM,
   EXTRAPOLATE_CAP_MS,
+  absenceIsLoss,
   angleDeltaDeg,
   cockpitReducer,
   contactsWithin,
@@ -14,6 +15,7 @@ import {
   haversineKm,
   initialBearingDeg,
   mapPopupsAllowed,
+  nextAbsenceMs,
   smoothAngleDeg,
   type CockpitFix,
   type CockpitState,
@@ -259,5 +261,42 @@ describe('cockpitReducer', () => {
     expect(mapPopupsAllowed(back.status === 'riding')).toBe(true);
     expect(mapPopupsAllowed(false)).toBe(true);
     expect(mapPopupsAllowed(true)).toBe(false);
+  });
+});
+
+describe('absence accounting — a partial sweep is not a disappearance', () => {
+  it('a sighting resets the clock outright', () => {
+    expect(nextAbsenceMs(45_000, true, false, 1000)).toBe(0);
+    expect(nextAbsenceMs(45_000, true, true, 1000)).toBe(0);
+  });
+
+  it('absence from a partial payload does not age the target at all', () => {
+    let a = 0;
+    for (let i = 0; i < 300; i++) a = nextAbsenceMs(a, false, true, 1000);
+    expect(a).toBe(0);
+    expect(absenceIsLoss(a)).toBe(false);
+  });
+
+  it('absence from complete payloads accumulates to the loss threshold', () => {
+    let a = 0;
+    for (let i = 0; i < 90; i++) a = nextAbsenceMs(a, false, false, 1000);
+    expect(a).toBe(90_000);
+    expect(absenceIsLoss(a)).toBe(false); // strictly past the grace
+    a = nextAbsenceMs(a, false, false, 1000);
+    expect(absenceIsLoss(a)).toBe(true);
+  });
+
+  it('mixed sweeps: partial gaps freeze the clock, complete ones run it', () => {
+    let a = 0;
+    a = nextAbsenceMs(a, false, false, 1000);
+    a = nextAbsenceMs(a, false, true, 1000);
+    a = nextAbsenceMs(a, false, true, 1000);
+    a = nextAbsenceMs(a, false, false, 1000);
+    expect(a).toBe(2_000);
+  });
+
+  it('honours a custom grace', () => {
+    expect(absenceIsLoss(5_000, 4_000)).toBe(true);
+    expect(absenceIsLoss(5_000, 5_000)).toBe(false);
   });
 });

@@ -51,6 +51,33 @@ export const EXTRAPOLATE_CAP_MS = 75_000;
 /** A target unseen for this long is gone — the ride ends with a message. */
 export const LOST_GRACE_MS = 90_000;
 
+/**
+ * Absence accounting for the ride's lost-target rule.
+ *
+ * "Unseen" must mean unseen by a COMPLETE sweep. The flights route's fast
+ * first wave is flagged `partial` and simply does not contain most of the
+ * sky; when a ride's 30 s refresh lands on one, the ridden aircraft is
+ * absent from it through no fault of its own — the 2026-10-26 browser
+ * verification watched a ride blank its OSD and stall on exactly that.
+ * So absence accumulates only on ticks where the current payload is
+ * complete: a partial payload is no-new-data, neither sighting nor gap.
+ * A sighting resets the clock outright.
+ */
+export function nextAbsenceMs(
+  absenceMs: number,
+  seen: boolean,
+  payloadPartial: boolean,
+  tickMs: number,
+): number {
+  if (seen) return 0;
+  return payloadPartial ? absenceMs : absenceMs + tickMs;
+}
+
+/** Has the target now been absent from complete sweeps past the grace? */
+export function absenceIsLoss(absenceMs: number, graceMs: number = LOST_GRACE_MS): boolean {
+  return absenceMs > graceMs;
+}
+
 const EARTH_R_KM = 6371;
 const KNOT_TO_KM_H = 1.852;
 const DEG = Math.PI / 180;
