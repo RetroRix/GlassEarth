@@ -91,6 +91,30 @@ describe('routeLineFeatures', () => {
     expect(features[0].geometry).toEqual({ type: 'LineString', coordinates: geometry.track });
   });
 
+  /* Round 2: the line runs to the pose, not just to the last report —
+     the final segment is the ride's own dead reckoning. */
+  it('extends the flown line from the last report to the current pose', () => {
+    const ahead = { lat: 31.95, lng: -105.9, bearingDeg: 80 };
+    const features = routeLineFeatures(ahead, { ...geometry, destination: null });
+    expect(features[0].geometry).toEqual({
+      type: 'LineString',
+      coordinates: [...geometry.track, [-105.9, 31.95]],
+    });
+  });
+
+  it('a single reported point still draws, once a pose exists to join it to', () => {
+    // The sparse-coverage start of a ride: one fix so far. A one-point
+    // line is nothing — but the fix-to-pose segment is a real trail.
+    const features = routeLineFeatures(pose, {
+      track: [[-106.4, 31.7]], destination: null,
+    });
+    expect(features).toHaveLength(1);
+    expect(features[0].geometry).toEqual({
+      type: 'LineString',
+      coordinates: [[-106.4, 31.7], [-106.0, 31.9]],
+    });
+  });
+
   it('the route ahead runs from the current pose to the destination', () => {
     const features = routeLineFeatures(pose, geometry);
     const ahead = features.find((f) => f.properties.seg === 'ahead');

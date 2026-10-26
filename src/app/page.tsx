@@ -437,14 +437,18 @@ export default function Dashboard() {
     };
   }, [cockpitState, allFlights]);
 
-  /* Riding through a partial sweep (lib/flight-load): the feed's fast
-     first wave is flagged partial and does not contain most of the sky,
-     the ridden aircraft included. Absence from a partial payload is
-     no-new-data — the OSD keeps the last record seen in a complete
-     payload (values intact, flagged as held) and the roster keeps the
-     held sky merged under the partial's fresher rows, instead of the
-     ride blanking and stalling the way the 2026-10-26 verification
-     watched it do. Only a complete payload may declare the target gone. */
+  /* Riding through gaps in the sweep (lib/flight-load): refreshes during
+     a ride land on partial first waves, on stale cached snapshots, and —
+     under sparse coverage — on complete sweeps that simply miss the
+     ridden aircraft for minutes at a time. None of that may blank the
+     ride: the OSD keeps the last record seen (values intact, flagged as
+     held) and the roster keeps the held sky merged under a partial's
+     fresher rows. Whether the ride is OVER is not decided here at all —
+     that is the map-side absence accounting's call (lib/cockpit:
+     complete sweeps only, five minutes of grace, grounded flag for a
+     landing). The 2026-10-26 gauntlet watched the old rule — hold only
+     through partials — blank a healthy ride's OSD on its first complete
+     miss and leave it showing "—" until the loss rule fired. */
   const heldRecordRef = useRef<CockpitFlightRecord | null>(null);
   const heldFlightsRef = useRef<typeof allFlights>([]);
   const flightsPartialNow = isPartialFlightPayload(data);
@@ -454,9 +458,9 @@ export default function Dashboard() {
       heldFlightsRef.current = [];
       return;
     }
+    if (cockpitRecord) heldRecordRef.current = cockpitRecord;
     if (!flightsPartialNow) {
       heldFlightsRef.current = allFlights;
-      if (cockpitRecord) heldRecordRef.current = cockpitRecord;
     }
   }, [cockpitState, allFlights, cockpitRecord, flightsPartialNow]);
   const heldForTarget = cockpitState.status === 'riding'
@@ -464,9 +468,14 @@ export default function Dashboard() {
     ? heldRecordRef.current
     : null;
   const osdFlight = cockpitState.status === 'riding'
-    ? recordForRide(cockpitRecord, heldForTarget, flightsPartialNow)
+    ? recordForRide(cockpitRecord, heldForTarget)
     : null;
-  const flightHeld = osdFlight !== null && cockpitRecord === null;
+  /* The displayed record is "held" whenever it is not this payload's own
+     word: the target is missing from the current payload entirely, or
+     the payload itself is a stale snapshot whose values may be minutes
+     old (the gauntlet's other failure — frozen values, no note). */
+  const flightHeld = osdFlight !== null
+    && (cockpitRecord === null || isStaleFlightPayload(data));
   const osdFlights = cockpitState.status === 'riding'
     ? flightsForRide(allFlights, heldFlightsRef.current, flightsPartialNow)
     : allFlights;

@@ -5,7 +5,9 @@ import {
   COCKPIT_ZOOM,
   CONTACT_RADIUS_KM,
   EXTRAPOLATE_CAP_MS,
+  LOST_GRACE_MS,
   absenceIsLoss,
+  advanceFix,
   angleDeltaDeg,
   cockpitReducer,
   contactsWithin,
@@ -75,6 +77,49 @@ describe('deadReckon', () => {
     const atCap = deadReckon(fix(), 1_000_000 + EXTRAPOLATE_CAP_MS);
     const wayPast = deadReckon(fix(), 1_000_000 + EXTRAPOLATE_CAP_MS * 10);
     expect(wayPast).toEqual(atCap);
+  });
+});
+
+describe('advanceFix — the fix clock only restarts on new information', () => {
+  const row = { lat: 58.5, lng: -94.0, headingDeg: 150, speedKnots: 260 };
+
+  it('the first fix takes the current clock', () => {
+    expect(advanceFix(null, row, 5_000).atMs).toBe(5_000);
+  });
+
+  it('a genuinely new position restarts the clock', () => {
+    const prev = advanceFix(null, row, 5_000);
+    expect(advanceFix(prev, { ...row, lat: 58.4 }, 9_000).atMs).toBe(9_000);
+  });
+
+  it('a repeated row keeps the original clock — a re-read is not a report', () => {
+    const prev = advanceFix(null, row, 5_000);
+    expect(advanceFix(prev, { ...row }, 9_000).atMs).toBe(5_000);
+    // …and again minutes later, the way the 1 s pull re-reads a stale
+    // snapshot for the whole of a feed gap:
+    const third = advanceFix(advanceFix(prev, { ...row }, 9_000), { ...row }, 185_000);
+    expect(third.atMs).toBe(5_000);
+  });
+
+  it('a change in heading, speed or grounded state is new information', () => {
+    const prev = advanceFix(null, row, 5_000);
+    expect(advanceFix(prev, { ...row, headingDeg: 151 }, 9_000).atMs).toBe(9_000);
+    expect(advanceFix(prev, { ...row, speedKnots: 250 }, 9_000).atMs).toBe(9_000);
+    expect(advanceFix(prev, { ...row, grounded: true }, 9_000).atMs).toBe(9_000);
+  });
+
+  it('the gauntlet freeze: repeated rows let the reckoning age to its cap and hold there', () => {
+    // Ride 1's OSD froze for ~3 minutes: the payload kept serving the
+    // same row and every re-read re-stamped it fresh, so the reckoning
+    // never aged. On the original clock the pose flies on to the cap
+    // point and waits there instead.
+    const t0 = 1_000_000;
+    let f = advanceFix(null, row, t0);
+    f = advanceFix(f, { ...row }, t0 + 180_000);
+    const aged = deadReckon(f, t0 + 180_000);
+    const atCap = deadReckon({ ...f, atMs: t0 }, t0 + EXTRAPOLATE_CAP_MS);
+    expect(aged).toEqual(atCap);
+    expect(haversineKm({ lat: row.lat, lng: row.lng }, aged)).toBeGreaterThan(5);
   });
 });
 
@@ -278,9 +323,13 @@ describe('absence accounting — a partial sweep is not a disappearance', () => 
   });
 
   it('absence from complete payloads accumulates to the loss threshold', () => {
+    // The grace is five minutes of complete-sweep absence (LOST_GRACE_MS —
+    // sparse coverage hides airborne aircraft for minutes at a time; the
+    // 90 s this used to be ended the gauntlet's WSG1652 ride ~60 s in).
     let a = 0;
-    for (let i = 0; i < 90; i++) a = nextAbsenceMs(a, false, false, 1000);
-    expect(a).toBe(90_000);
+    for (let i = 0; i < 300; i++) a = nextAbsenceMs(a, false, false, 1000);
+    expect(a).toBe(300_000);
+    expect(a).toBe(LOST_GRACE_MS);
     expect(absenceIsLoss(a)).toBe(false); // strictly past the grace
     a = nextAbsenceMs(a, false, false, 1000);
     expect(absenceIsLoss(a)).toBe(true);

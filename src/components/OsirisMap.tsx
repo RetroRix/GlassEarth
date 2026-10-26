@@ -15,7 +15,7 @@ import { MAP_DEFAULTS, MAP_PALETTE_KEYS, readMapPalette, satColorFor, type MapPa
 import { CAMERA_SETTLE_MS, cameraGhostFadeMs, cameraGhostPaint, cameraGhostState, type CameraGhostState } from '@/lib/camera-ghosting';
 import {
   COCKPIT_PITCH, COCKPIT_TOP_PADDING_FRACTION, COCKPIT_ZOOM,
-  absenceIsLoss, createFollowSmoother, mapPopupsAllowed, nextAbsenceMs, type CockpitFix,
+  absenceIsLoss, advanceFix, createFollowSmoother, mapPopupsAllowed, nextAbsenceMs, type CockpitFix,
 } from '@/lib/cockpit';
 import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import { STYLE_EVENT } from '@/lib/style-tokens';
@@ -3060,6 +3060,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     let absenceMs = 0;
     let wasAirborne = false;
     let lostFired = false;
+    /* The last fix handed to the smoother. Feed rows carry no timestamp
+       of their own, so advanceFix keeps a repeated row on the original
+       clock — a stale snapshot re-read every second must not keep the
+       dead reckoning at age zero (see lib/cockpit). */
+    let lastFix: CockpitFix | null = null;
 
     /* The least of a feed row the follow loop reads. */
     interface FeedRow { icao24?: string; lat: number; lng: number; heading?: number; speed_knots?: number | null; grounded?: boolean }
@@ -3087,13 +3092,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           cockpitLostRef.current?.('landed');
           return;
         }
-        const fix: CockpitFix = {
+        const fix = advanceFix(lastFix, {
           lat: f.lat, lng: f.lng,
           headingDeg: f.heading || 0,
           speedKnots: f.speed_knots || 0,
           grounded: f.grounded,
-          atMs: Date.now(),
-        };
+        }, Date.now());
+        lastFix = fix;
         smoother.pushFix(fix);
         return;
       }
@@ -3109,6 +3114,48 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     map.on('zoomstart', onGesture);
     map.on('rotatestart', onGesture);
     map.on('pitchstart', onGesture);
+
+    /* Grab detection, sensed on the canvas itself. MapLibre's drag
+       events cannot be the only trigger: the follow drive jumpTo's every
+       frame, and each programmatic move pre-empts the pending drag
+       handler before it can activate — under a real ride a genuine drag
+       neither pans nor ever fires dragstart (proven against the bare
+       map and the assembled app; see the round-2 cockpit report). So
+       the ride watches the pointer directly: pressing the canvas holds
+       the drive at once; moving past a small threshold is the grab —
+       with the drive held, MapLibre's own handler activates and the
+       rest of the drag pans normally; releasing a press that never
+       moved hands the drive straight back, so a tap cannot strand the
+       ride paused. A wheel turn is unambiguous intent and grabs at
+       once. The MapLibre listeners above stay as a second path (they
+       fire once the drive is held; the reducer makes GRAB idempotent). */
+    let driveHeld = false;
+    let downPoint: { x: number; y: number } | null = null;
+    let grabbed = false;
+    const canvasBox = map.getCanvasContainer();
+    const onPointerDown = (e: PointerEvent) => {
+      downPoint = { x: e.clientX, y: e.clientY };
+      driveHeld = true;
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!downPoint || grabbed) return;
+      if (Math.hypot(e.clientX - downPoint.x, e.clientY - downPoint.y) >= 6) {
+        grabbed = true;
+        cockpitGrabRef.current?.();
+      }
+    };
+    const onPointerRelease = () => {
+      downPoint = null;
+      if (!grabbed) driveHeld = false;
+    };
+    const onWheelGrab = () => { cockpitGrabRef.current?.(); };
+    canvasBox.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerRelease);
+    window.addEventListener('pointercancel', onPointerRelease);
+    window.addEventListener('blur', onPointerRelease);
+    canvasBox.addEventListener('wheel', onWheelGrab, { passive: true });
+
 
     let raf = 0;
     const frame = () => {
@@ -3135,7 +3182,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
             features: routeLineFeatures(pose, cockpitRouteRef.current ?? { track: [], destination: null }),
           } as never);
         }
-        if (locked) {
+        if (locked && !driveHeld) {
           map.jumpTo({
             center: [pose.lng, pose.lat],
             bearing: pose.bearingDeg,
@@ -3155,6 +3202,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.off('zoomstart', onGesture);
       map.off('rotatestart', onGesture);
       map.off('pitchstart', onGesture);
+      canvasBox.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerRelease);
+      window.removeEventListener('pointercancel', onPointerRelease);
+      window.removeEventListener('blur', onPointerRelease);
+      canvasBox.removeEventListener('wheel', onWheelGrab);
       FLIGHT_LAYERS.forEach(id => {
         if (map.getLayer(id)) {
           try { map.setFilter(id, null as never); } catch { /* style not settled */ }

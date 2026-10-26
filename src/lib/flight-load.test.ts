@@ -86,26 +86,30 @@ describe('isStaleSweepPromise', () => {
   });
 });
 
-/* ── The 2026-10-26 fix: a ride must survive a partial sweep ── */
+/* ── The 2026-10-26 fix: a ride must survive a partial sweep — and, from
+      round 2 the same day, any other gap: the display holds the last
+      record through complete-sweep misses too, because losing the ride
+      is the absence clock's decision (lib/cockpit), not the display's. ── */
 
 describe('recordForRide', () => {
   const held = { icao24: 'abc123', alt: 35_000 };
   const current = { icao24: 'abc123', alt: 36_000 };
 
   it('prefers the current record whenever the feed has it', () => {
-    expect(recordForRide(current, held, true)).toBe(current);
-    expect(recordForRide(current, held, false)).toBe(current);
-    expect(recordForRide(current, null, true)).toBe(current);
+    expect(recordForRide(current, held)).toBe(current);
+    expect(recordForRide(current, null)).toBe(current);
   });
 
-  it('holds the last record through a partial payload — absence there is no data', () => {
-    expect(recordForRide(null, held, true)).toBe(held);
-    expect(recordForRide(undefined, held, true)).toBe(held);
+  it('holds the last record whenever the current payload lacks the aircraft', () => {
+    // Partial sweep, complete-sweep miss, stale snapshot — the display
+    // does not care which; the values stay up under the FEED GAP note.
+    expect(recordForRide(null, held)).toBe(held);
+    expect(recordForRide(undefined, held)).toBe(held);
   });
 
-  it('a complete payload is allowed to say the aircraft is gone', () => {
-    expect(recordForRide(null, held, false)).toBeNull();
-    expect(recordForRide(null, null, true)).toBeNull();
+  it('is null only when the ride has never seen its aircraft', () => {
+    expect(recordForRide(null, null)).toBeNull();
+    expect(recordForRide(undefined, undefined)).toBeNull();
   });
 });
 

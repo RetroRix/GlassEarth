@@ -48,8 +48,17 @@ export const CONTACT_LIMIT = 12;
 
 /** Dead reckoning is trusted this far past the last fix, no further. */
 export const EXTRAPOLATE_CAP_MS = 75_000;
-/** A target unseen for this long is gone — the ride ends with a message. */
-export const LOST_GRACE_MS = 90_000;
+/** A target unseen for this long is gone — the ride ends with a message.
+    Five minutes of COMPLETE-sweep absence (see nextAbsenceMs): sparse
+    ADS-B coverage — oceanic, northern, low-altitude — can hide an airborne
+    aircraft from several consecutive sweeps, and the 90 s this used to be
+    ended healthy rides mid-flight (the 2026-10-26 gauntlet watched a
+    25-minute hop declared lost ~60 s in). At the ride's 30 s refresh,
+    five minutes is ~10 complete sweeps in a row with no sign of the
+    target; meanwhile the pose dead-reckons to its cap and holds there,
+    the OSD shows the last report under a FEED GAP note, and a landing
+    still ends the ride at once via the feed's grounded flag. */
+export const LOST_GRACE_MS = 300_000;
 
 /**
  * Absence accounting for the ride's lost-target rule.
@@ -92,6 +101,42 @@ export interface CockpitFix {
   grounded?: boolean;
   /** Client clock (ms) when this fix was taken in — extrapolation ages from here. */
   atMs: number;
+}
+
+/** A feed row distilled to what a fix is made from. */
+export interface CockpitFixInput {
+  lat: number;
+  lng: number;
+  headingDeg: number;
+  speedKnots: number;
+  grounded?: boolean;
+}
+
+/**
+ * The smoother's next fix, from the latest feed row. The feed rows carry
+ * no per-aircraft timestamp, so the client clock is the only clock a fix
+ * has — and it must only restart when the row actually says something
+ * new. The follow loop re-reads the current payload every second; when
+ * the route is serving a cached snapshot (or coverage is sparse) the
+ * same row comes back again and again, and stamping it fresh each time
+ * would pin the dead reckoning at age ~0 forever — the aircraft frozen
+ * on its last reported point, the exact freeze the 2026-10-26 gauntlet
+ * watched for three minutes. A row identical to the previous fix keeps
+ * the previous fix's clock, so the reckoning ages honestly to its cap
+ * and holds there until a genuinely new report lands.
+ */
+export function advanceFix(
+  prev: CockpitFix | null,
+  row: CockpitFixInput,
+  nowMs: number,
+): CockpitFix {
+  const repeated = prev !== null
+    && prev.lat === row.lat
+    && prev.lng === row.lng
+    && prev.headingDeg === row.headingDeg
+    && prev.speedKnots === row.speedKnots
+    && !!prev.grounded === !!row.grounded;
+  return { ...row, atMs: repeated ? prev.atMs : nowMs };
 }
 
 /** Where the camera should sit: a point, looking along a bearing. */

@@ -8,6 +8,7 @@ import {
   type Airport,
   type AircraftDetail,
 } from './FlightWatchPanel';
+import { rideRouteText } from '@/lib/cockpit-osd';
 
 const ap = (icao: string, iata: string, lat: number, lng: number): Airport =>
   ({ icao, iata, lat, lng });
@@ -153,16 +154,21 @@ describe('resolveEndpoints', () => {
       { found: true, origin: LGA, destination: RSW },
       [-81.9, 27.4],
     );
-    expect(origin).toBeNull();
     expect(destination?.iata).toBe('RSW');
+    // Round 2 (the CAV1478 "···· → YWG" gauntlet failure): the schedule
+    // that was just believed about the destination also names the origin.
+    // With nothing observed, its claim is the display origin — labelled
+    // 'scheduled' downstream, exactly like the destination.
+    expect(origin?.iata).toBe('LGA');
   });
 
   it('still rejects an uncorroborated schedule when the live position is off its corridor', () => {
-    const { destination } = resolveEndpoints(
+    const { origin, destination } = resolveEndpoints(
       detail({ track: [], points: 0, departure: null }),
       { found: true, origin: CLE, destination: DTW },
       [-111.98, 40.79], // over Utah — nowhere near CLE→DTW
     );
+    expect(origin).toBeNull();
     expect(destination).toBeNull();
   });
 
@@ -173,5 +179,27 @@ describe('resolveEndpoints', () => {
       null,
     );
     expect(destination).toBeNull();
+  });
+
+  /* The 2026-10-26 gauntlet, exactly: CAV1478, Churchill → Winnipeg, no
+     trace, no observed departure, live position mid-route. The OSD read
+     "···· → YWG"; the schedule knew YYQ all along. Both ends now resolve,
+     and the pair carries the schedule-claim label, not an observation's. */
+  it('names both ends of a northern hop from its corroborated schedule (the CAV1478 shape)', () => {
+    const YYQ = ap('CYYQ', 'YYQ', 58.74, -94.07);
+    const YWG = ap('CYWG', 'YWG', 49.91, -97.24);
+    const merged: AircraftDetail = {
+      ...detail({ track: [], points: 0, departure: null }),
+      ...resolveEndpoints(
+        detail({ track: [], points: 0, departure: null }),
+        { found: true, origin: YYQ, destination: YWG },
+        [-95.6, 54.3],
+      ),
+    };
+    expect(merged.origin?.iata).toBe('YYQ');
+    expect(merged.destination?.iata).toBe('YWG');
+    expect(rideRouteText(merged)).toEqual({
+      originLabel: 'YYQ', destinationLabel: 'YWG', state: 'scheduled',
+    });
   });
 });

@@ -100,6 +100,14 @@ export function onCorridor(here: [number, number], origin: Airport, destination:
  * accepted when its origin agrees with that departure. With no observed
  * departure to check against — coverage that began mid-ocean — the corridor
  * test stands in. Failing both, nothing is drawn.
+ *
+ * When the schedule IS accepted and no departure was ever observed (the
+ * trace lookup returning nothing is the production norm, not the
+ * exception), the accepted schedule's origin is also the display origin —
+ * it is the same claim as the accepted destination, labelled the same way
+ * ('scheduled' downstream), and the alternative was a route line that
+ * named where the flight was going but not where it came from. An
+ * observed departure always wins over it.
  */
 export function resolveEndpoints(
   ac: AircraftDetail,
@@ -122,14 +130,21 @@ export function resolveEndpoints(
   if (observedDep && observedArr) return { origin: observedDep, destination: observedArr };
 
   let destination: Airport | null = observedArr;
+  let origin: Airport | null = observedDep;
   if (!destination && sched?.origin && sched?.destination && here) {
     const corroborated = observedDep
       ? sameAirport(observedDep, sched.origin)
       : onCorridor(here, sched.origin, sched.destination);
-    if (corroborated) destination = sched.destination;
+    if (corroborated) {
+      destination = sched.destination;
+      // The schedule that was just believed about the destination also
+      // names the departure — and when none was observed, that claim is
+      // the only origin there is (see the note above).
+      if (!origin) origin = sched.origin;
+    }
   }
 
-  return { origin: observedDep, destination };
+  return { origin, destination };
 }
 
 interface FlightWatchPanelProps {

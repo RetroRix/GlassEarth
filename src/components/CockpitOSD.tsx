@@ -56,10 +56,14 @@ export interface CockpitFlightRecord {
 
 interface CockpitOSDProps {
   target: CockpitTarget;
-  /** The target's latest feed record; null during a gap in coverage. */
+  /** The target's latest feed record. The page holds it through gaps in
+   *  coverage, so this is null only before the ride's first report. */
   flight: CockpitFlightRecord | null;
-  /** True when `flight` is the last record seen before a partial feed sweep
-   *  (the page holds it rather than blanking the OSD — see flight-load). */
+  /** True when `flight` is being held through a gap — the last record seen
+   *  before a partial sweep or a complete-sweep miss, or a record served
+   *  from a stale snapshot (the page holds/flags it rather than blanking
+   *  the OSD — see flight-load). The OSD keeps its values on screen under
+   *  a FEED GAP note instead of blanking them. */
   flightHeld?: boolean;
   lock: 'follow' | 'free';
   /** The whole feed, for the nearby-flights roster. */
@@ -233,8 +237,8 @@ export default function CockpitOSD({
           )}
         </div>
         {!flight && (
-          <div style={{ ...PILL, color: 'var(--alert-orange)', fontSize: 10 }}>
-            Waiting for the next position report…
+          <div style={{ ...PILL, color: 'var(--alert-orange)', fontSize: 9, letterSpacing: '0.08em' }}>
+            FEED GAP — NO REPORT YET
           </div>
         )}
         {flight && flightHeld && (

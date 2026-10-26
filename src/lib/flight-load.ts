@@ -60,25 +60,29 @@ export function isPartialFlightPayload(data: { partial?: unknown } | null | unde
   return data?.partial === true;
 }
 
-/* ── Riding through a partial sweep ──
+/* ── Riding through gaps in the sweep ──
    While a cockpit ride is on, the page refreshes the feed every 30 s, and
-   some of those refreshes land on the route's fast first wave — a partial
-   payload that does not contain the ridden aircraft at all. Absence from
-   a partial payload is no information: it must not blank the ride's OSD,
-   empty its contacts roster, or count toward losing the target. These two
-   helpers are the page-side half of that rule (the map-side half is the
-   absence accounting in lib/cockpit). */
+   those refreshes do not always contain the ridden aircraft: the route's
+   fast first wave is flagged `partial` and skips most of the sky, a
+   cached snapshot is flagged `stale`, and under sparse coverage even a
+   complete sweep can miss an airborne aircraft for minutes at a time.
+   None of that may blank the ride: the DISPLAY holds the last record
+   seen (values intact, flagged as held) and the roster keeps the held
+   sky merged under the partial's fresher rows. Whether the ride is over
+   is a separate question, and it belongs to the absence accounting in
+   lib/cockpit — complete sweeps only, with a five-minute grace — not
+   to the display. The helpers below are the page-side half of that rule. */
 
-/** The record a ride should display: the current one when the feed has it;
- *  during a partial payload, the last record seen (held, values intact);
- *  from a complete payload, absence is real and the answer is null. */
+/** The record a ride should display: the current one when the feed has
+ *  it; otherwise the last record seen, whatever kind of gap this is —
+ *  partial sweep, complete-sweep miss, or stale snapshot. Null only when
+ *  the ride has never seen its aircraft at all. */
 export function recordForRide<T>(
   current: T | null | undefined,
   held: T | null | undefined,
-  payloadPartial: boolean,
 ): T | null {
   if (current) return current;
-  return payloadPartial ? (held ?? null) : null;
+  return held ?? null;
 }
 
 /** The roster a ride should show during a partial payload: the partial

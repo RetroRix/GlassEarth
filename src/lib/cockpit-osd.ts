@@ -129,17 +129,32 @@ export interface CockpitRouteFeature {
  * current (smoothed) pose to its destination — the route ahead, readable
  * in the pitched view — and a ring point on the destination itself. Any
  * piece the data doesn't support is simply absent.
+ *
+ * The flown line runs all the way to the pose: its final segment is the
+ * dead reckoning from the last reported point to the position the ride
+ * is presenting — the same reckoning the marker and the camera fly by,
+ * capped like they are, so the segment can never stretch past what the
+ * ride itself asserts. Ending the line at the last report instead left
+ * it kilometres behind the nose on sparse coverage (and a one-point
+ * track drew nothing at all), so the first minutes of a real ride showed
+ * no trail even though the feed had been reporting all along — the
+ * flown-line half of the 2026-10-26 gauntlet failure.
  */
 export function routeLineFeatures(
   pose: CockpitPose | null,
   geometry: CockpitRouteGeometry,
 ): CockpitRouteFeature[] {
   const features: CockpitRouteFeature[] = [];
-  if (geometry.track.length >= 2) {
+  const track = geometry.track;
+  const last = track[track.length - 1];
+  const flown: [number, number][] = pose && last && !(last[0] === pose.lng && last[1] === pose.lat)
+    ? [...track, [pose.lng, pose.lat]]
+    : track;
+  if (flown.length >= 2) {
     features.push({
       type: 'Feature',
       properties: { seg: 'flown' },
-      geometry: { type: 'LineString', coordinates: geometry.track },
+      geometry: { type: 'LineString', coordinates: flown },
     });
   }
   if (pose && geometry.destination) {

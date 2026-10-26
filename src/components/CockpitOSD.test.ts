@@ -79,26 +79,30 @@ describe('CockpitOSD — the FPV corner layout', () => {
     expect(html).not.toContain('RE-CENTRE');
   });
 
-  it('a feed gap says so in the corner and blanks the readouts honestly', () => {
+  it('before the first report, the corner carries the feed-gap note — there is nothing to hold yet', () => {
     const html = render({ flight: null, flights: [] });
-    expect(html).toContain('Waiting for the next position report');
+    expect(html).toContain('FEED GAP — NO REPORT YET');
+    expect(html).not.toContain('Waiting for the next position report'); // retired wording
     expect(html).toContain('SKW5109'); // the target still names the corner
     expect(html).not.toContain('NEARBY');
   });
 });
 
-/* ── The 2026-10-26 fix: a partial sweep must not blank the ride ──
-   The page holds the last complete-payload record and passes it with
-   flightHeld set; the OSD keeps every value on screen and says so,
-   instead of switching to the waiting state with blank readouts. */
-describe('CockpitOSD — riding through a partial sweep', () => {
+/* ── The 2026-10-26 fixes: a gap in the sweep must not blank the ride ──
+   Round 1: a partial sweep is no-new-data. Round 2: the same rule for
+   complete-sweep misses and stale-served records — the page holds the
+   last record seen and passes it with flightHeld set; the OSD keeps
+   every value on screen under the FEED GAP note, instead of blanking
+   the readouts to "—" the way the gauntlet watched it do. */
+describe('CockpitOSD — riding through a gap in the feed', () => {
   it('a held record keeps its values and is flagged as a feed gap', () => {
     const html = render({ flight, flightHeld: true });
-    expect(html).toContain('FEED GAP');
+    expect(html).toContain('FEED GAP — SHOWING LAST REPORT');
     expect(html).toContain('32,800 ft');
     expect(html).toContain('450 kt');
     expect(html).toContain('304° NW');
     expect(html).not.toContain('Waiting for the next position report');
+    expect(html).not.toContain('NO REPORT YET');
   });
 
   it('a fresh record shows no gap note', () => {
@@ -106,9 +110,9 @@ describe('CockpitOSD — riding through a partial sweep', () => {
     expect(html).not.toContain('FEED GAP');
   });
 
-  it('the waiting state is only for having no record at all', () => {
+  it('the no-report state is only for having no record at all', () => {
     const html = render({ flight: null, flightHeld: true, flights: [] });
-    expect(html).toContain('Waiting for the next position report');
-    expect(html).not.toContain('FEED GAP');
+    expect(html).toContain('FEED GAP — NO REPORT YET');
+    expect(html).not.toContain('SHOWING LAST REPORT');
   });
 });
