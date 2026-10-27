@@ -232,9 +232,12 @@ export default function MissionsCard({
       aria-modal="false"
       aria-label="First-run missions"
       data-testid="missions-card"
-      className="fixed inset-x-2 bottom-[68px] z-[940] max-h-[calc(100dvh-136px)] overflow-y-auto styled-scrollbar md:left-20 md:right-auto md:bottom-24 md:w-[410px]"
+      className="fixed inset-x-2 bottom-[68px] z-[940] md:left-20 md:right-auto md:bottom-24 md:w-[410px]"
     >
-      <div className="glass-panel p-4">
+      {/* A bottom sheet on a phone, not a full-screen takeover: the sheet
+          is capped, the mission list scrolls inside it, and the header
+          and the Skip button stay put at its top and bottom edges. */}
+      <div className="glass-panel flex max-h-[68dvh] flex-col p-4 md:max-h-[min(760px,calc(100dvh-136px))]">
         <div className="flex items-start gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--gold-primary)]/10 text-[var(--gold-primary)]">
             <ListChecks className="h-5 w-5" />
@@ -261,7 +264,7 @@ export default function MissionsCard({
           </div>
         </div>
 
-        <ol className="mt-2 divide-y divide-[var(--border-secondary)]">
+        <ol className="styled-scrollbar mt-2 min-h-0 flex-1 divide-y divide-[var(--border-secondary)] overflow-y-auto">
           {MISSIONS.map(mission => {
             const done = isMissionComplete(state, mission.id);
             const Icon = MISSION_ICONS[mission.id];
