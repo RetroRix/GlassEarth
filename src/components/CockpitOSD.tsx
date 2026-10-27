@@ -22,22 +22,24 @@ import {
   type CockpitRouteGeometry,
 } from '@/lib/cockpit-osd';
 import {
-  formatAlt,
   resolveEndpoints,
   type AircraftDetail,
   type ScheduledRoute,
 } from './FlightWatchPanel';
+import CockpitPFD from './CockpitPFD';
 
 /* ═══════════════════════════════════════════════════════════════
-   OSIRIS — Cockpit OSD (the FPV rework)
+   OSIRIS — Cockpit OSD (the FPV rework + the glass PFD)
    The first cockpit put a panel over the bottom of the frame and the
    pilot could hardly see over the top of it. This is the rework: no
-   panel, ever. Everything the ride shows lives in the screen corners,
-   the way a flight OSD sits in FPV goggles — small mono readouts on a
-   faint dark pill (the same trick the feed badges use, so it reads in
+   panel, ever. The ride's identity lives in the top corners, the way a
+   flight OSD sits in FPV goggles — small mono readouts on a faint
+   dark pill (the same trick the feed badges use, so it reads in
    every theme and stays exempt from the sensor-look filters, which
-   only touch the picture). The centre of the screen is the forward
-   view, and nothing here is allowed to wander into it.
+   only touch the picture) — and the telemetry lives in the glass
+   PFD band along the bottom (CockpitPFD, pipeline #20). The centre
+   of the screen is the forward view, and nothing here is allowed to
+   wander into it.
    ═══════════════════════════════════════════════════════════════ */
 
 /** The live feed record for the ridden aircraft, as the page derives it. */
@@ -77,10 +79,11 @@ interface CockpitOSDProps {
   onRouteGeometry: (geometry: CockpitRouteGeometry) => void;
 }
 
-/* Corner placement: below the header/counter chrome at the top, above the
-   bottom control bars, inset by the device safe areas on notched phones. */
-const TOP_ROW = 'top-[max(7.25rem,calc(env(safe-area-inset-top)_+_6.75rem))] md:top-[max(8.25rem,calc(env(safe-area-inset-top)_+_7.5rem))]';
-const BOTTOM_ROW = 'bottom-[max(6.25rem,calc(env(safe-area-inset-bottom)_+_5.5rem))] md:bottom-[max(7.75rem,calc(env(safe-area-inset-bottom)_+_7rem))]';
+/* Corner placement: while a ride owns the screen the app's chrome is
+   hidden and the browser is asked for fullscreen, so the top strip sits
+   at the very top of the frame, inset only by the device safe area.
+   The bottom belongs to the glass PFD band (CockpitPFD). */
+const TOP_ROW = 'top-[max(0.75rem,env(safe-area-inset-top))] md:top-[max(1rem,env(safe-area-inset-top))]';
 
 const PILL: CSSProperties = {
   background: 'rgba(5,8,14,0.45)',
@@ -287,21 +290,11 @@ export default function CockpitOSD({
         )}
       </div>
 
-      {/* ── BOTTOM-LEFT — altitude ── */}
-      <div className={`absolute left-4 md:left-[104px] ${BOTTOM_ROW}`} style={PILL}>
-        <div style={LABEL}>ALT</div>
-        <div style={VALUE} className="tabular-nums">
-          {flight ? formatAlt(flight.alt, flight.grounded) : '—'}
-        </div>
-      </div>
-
-      {/* ── BOTTOM-RIGHT — ground speed ── */}
-      <div className={`absolute right-4 md:right-6 ${BOTTOM_ROW} text-right`} style={PILL}>
-        <div style={LABEL}>GND SPEED</div>
-        <div style={VALUE} className="tabular-nums">
-          {flight && typeof flight.speed_knots === 'number' ? `${Math.round(flight.speed_knots)} kt` : '—'}
-        </div>
-      </div>
+      {/* ── BOTTOM — the glass PFD band (pipeline #20): speed tape,
+          attitude ball, altitude tape. It replaces the old corner
+          ALT / GND SPEED pills; the view stays the hero and the
+          instruments stay low, translucent and secondary. ── */}
+      <CockpitPFD flight={flight} flightHeld={flightHeld} lock={lock} targetIcao={target.icao24} />
 
       {/* ── RIGHT EDGE — nearby flights, a chip until asked ── */}
       {flight && contacts.length > 0 && (

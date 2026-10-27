@@ -33,18 +33,26 @@ const render = (over: Partial<Parameters<typeof CockpitOSD>[0]> = {}) =>
     ...over,
   }));
 
-describe('CockpitOSD — the FPV corner layout', () => {
-  it('puts the ride in the corners: callsign top-left, heading top-centre, alt and speed at the bottom', () => {
+describe('CockpitOSD — the FPV layout with the glass PFD', () => {
+  it('puts identity in the top corners and the telemetry in the bottom band', () => {
     const html = render();
     expect(html).toContain('SKW5109'); // callsign, top-left
     expect(html).toContain('ABC123'); // ICAO, beside it
     expect(html).toContain('HDG'); // heading, top-centre
     expect(html).toContain('304° NW'); // digits + cardinal
-    expect(html).toContain('ALT');
-    expect(html).toContain('32,800 ft'); // formatAlt(10 000 m)
-    expect(html).toContain('GND SPEED');
-    expect(html).toContain('450 kt');
+    expect(html).toContain('SPD · KT'); // the speed tape, bottom-left of the band
+    expect(html).toContain('450'); // the boxed ground speed
+    expect(html).toContain('ALT · FT'); // the altitude tape, bottom-right
+    expect(html).toContain('32,800'); // toFeet(10 000 m), boxed on the tape
+    expect(html).toContain('BANK EST'); // the attitude ball, honestly labelled
+    expect(html).toContain('VS 0'); // derived vertical speed under the alt tape
     expect(html).toContain('LEAVE'); // the way out, a corner button
+  });
+
+  it('the old corner pills are gone — the band replaced them', () => {
+    const html = render();
+    expect(html).not.toContain('GND SPEED');
+    expect(html).not.toContain('32,800 ft'); // the value lives on the tape now, not a pill
   });
 
   it('has no centre panel and none of the old strip chrome', () => {
@@ -98,8 +106,8 @@ describe('CockpitOSD — riding through a gap in the feed', () => {
   it('a held record keeps its values and is flagged as a feed gap', () => {
     const html = render({ flight, flightHeld: true });
     expect(html).toContain('FEED GAP — SHOWING LAST REPORT');
-    expect(html).toContain('32,800 ft');
-    expect(html).toContain('450 kt');
+    expect(html).toContain('32,800'); // held altitude, on the tape
+    expect(html).toContain('450'); // held ground speed, boxed
     expect(html).toContain('304° NW');
     expect(html).not.toContain('Waiting for the next position report');
     expect(html).not.toContain('NO REPORT YET');

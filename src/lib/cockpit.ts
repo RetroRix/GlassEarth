@@ -22,14 +22,15 @@ export const COCKPIT_ZOOM = 11.5;
 export const COCKPIT_PITCH = 76;
 
 /**
- * FPV framing: the map is padded at the top by this fraction of the screen
- * height, which drops the aircraft to the bottom edge of the frame — a nose,
- * not a marker in the middle — so the frame is overwhelmingly the world
- * ahead: horizon up top, ground streaming below. (MapLibre places the
- * camera centre at 50% + fraction/2 of the height: 0.55 puts the aircraft
- * ~78% down the frame.)
+ * FPV framing: the map is padded at the top by this fraction of the CLEAR
+ * height — the screen above the glass PFD band (lib/cockpit-pfd) — which
+ * drops the aircraft low in that clear area, a nose near its bottom, so
+ * the stage is overwhelmingly the world ahead: horizon up top, ground
+ * streaming below. (MapLibre places the camera centre at (1 + fraction)
+ * / 2 of the padded height: 0.52 puts the aircraft ~76% down the clear
+ * area.)
  */
-export const COCKPIT_TOP_PADDING_FRACTION = 0.55;
+export const COCKPIT_TOP_PADDING_FRACTION = 0.52;
 
 /**
  * While a ride owns the screen, the map's popups stay shut: the forward

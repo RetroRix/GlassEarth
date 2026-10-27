@@ -15,10 +15,14 @@ import { createSatelliteLayer, parseColor, SAT_MAX_ZOOM, type SatPoint } from '@
 import { MAP_DEFAULTS, MAP_PALETTE_KEYS, readMapPalette, satColorFor, type MapPalette } from '@/lib/map-palette';
 import { CAMERA_SETTLE_MS, cameraGhostFadeMs, cameraGhostPaint, cameraGhostState, type CameraGhostState } from '@/lib/camera-ghosting';
 import {
-  COCKPIT_PITCH, COCKPIT_TOP_PADDING_FRACTION, COCKPIT_ZOOM,
+  COCKPIT_PITCH, COCKPIT_ZOOM,
   absenceIsLoss, advanceFix, createFollowSmoother, mapPopupsAllowed, nextAbsenceMs, type CockpitFix,
 } from '@/lib/cockpit';
 import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
+import {
+  PFD_BAND_HEIGHT_DESKTOP_PX, PFD_BAND_HEIGHT_MOBILE_PX,
+  cockpitRidePadding, satelliteTileUrl,
+} from '@/lib/cockpit-pfd';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -151,6 +155,10 @@ interface OsirisMapProps {
   onCockpitGrab?: () => void;
   /** The ridden aircraft landed or left the feed — the ride should end. */
   onCockpitLost?: (reason: 'landed' | 'lost') => void;
+  /** The satellite imagery a ride defaults to is unreachable (its tiles
+   *  failed the probe) — the page falls the ride back to the visitor's
+   *  previous style rather than leaving a blank or broken basemap. */
+  onCockpitSatelliteFailed?: () => void;
   /** A piece of OI's analysis was clicked: an arc ("link:<id>") or a point ("a:<actor>", "e:<event>"…); null for empty map. */
   onOiSelect?: (key: string | null) => void;
   /** The pointer is over a piece of OI's analysis, or has left it. */
@@ -236,7 +244,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -255,6 +263,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   const cockpitGrabRef = useRef(onCockpitGrab);
   const cockpitLostRef = useRef(onCockpitLost);
   const cockpitRouteRef = useRef(cockpitRoute);
+  const cockpitTargetRef = useRef(cockpitTarget);
+  const cockpitSatFailedRef = useRef(onCockpitSatelliteFailed);
+  const probedSatelliteRideRef = useRef<string | null>(null);
   /* The Live Alert pins currently drawn, and the opener for one of them, so
      the feed's locate button can land on a pin and open it. */
   const alertPinsRef = useRef<AlertPinFeature[]>([]);
@@ -2675,6 +2686,37 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     } catch (e) {
       console.warn('Style switch failed:', e);
     }
+
+    /* Ride probe: a cockpit ride defaults to this imagery, so while one
+       is on, verify the tiles are actually reachable — an Image load of
+       one tile at the ride's zoom, retried once — and tell the page if
+       they are not, so the ride falls back to the visitor's previous
+       style instead of flying over a broken basemap. Map errors naming
+       the imagery host fail it faster. Once per ride target. */
+    const rideTarget = cockpitTargetRef.current;
+    if (mapStyle === 'dark' || !rideTarget) return;
+    if (probedSatelliteRideRef.current === rideTarget.icao24) return;
+    probedSatelliteRideRef.current = rideTarget.icao24;
+    let probeSettled = false;
+    let hostErrors = 0;
+    const failProbe = () => { if (!probeSettled) { probeSettled = true; cockpitSatFailedRef.current?.(); } };
+    const onProbeMapError = (e: { error?: { message?: string } }) => {
+      if (probeSettled) return;
+      if ((e.error?.message || '').includes('arcgisonline')) { hostErrors += 1; if (hostErrors >= 3) failProbe(); }
+    };
+    map.on('error', onProbeMapError);
+    const probeCenter = map.getCenter();
+    const probeUrl = satelliteTileUrl(probeCenter.lat, probeCenter.lng, 11);
+    const attemptProbe = (triesLeft: number) => {
+      if (probeSettled) return;
+      const img = new Image();
+      const timer = setTimeout(() => { img.src = ''; if (triesLeft > 0) attemptProbe(triesLeft - 1); else failProbe(); }, 9000);
+      img.onload = () => { clearTimeout(timer); probeSettled = true; };
+      img.onerror = () => { clearTimeout(timer); if (triesLeft > 0) attemptProbe(triesLeft - 1); else failProbe(); };
+      img.src = probeUrl;
+    };
+    attemptProbe(1);
+    return () => { probeSettled = true; map.off('error', onProbeMapError); };
   }, [mapReady, mapStyle]);
 
   // Live Clouds — NOAA's satellite mosaic, hung at cloud altitude over the
@@ -3027,7 +3069,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   // Keep the refs the cockpit loop reads pointed at the latest render.
   useEffect(() => { dataRef.current = data; });
-  useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; cockpitRouteRef.current = cockpitRoute; });
+  useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; cockpitRouteRef.current = cockpitRoute; cockpitTargetRef.current = cockpitTarget; cockpitSatFailedRef.current = onCockpitSatelliteFailed; if (!cockpitTarget) probedSatelliteRideRef.current = null; });
 
   // ── COCKPIT FOLLOW (lib/cockpit) ──
   // A rAF loop glides the camera along with the ridden aircraft: the
@@ -3051,10 +3093,28 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         try { map.setFilter(id, ['!=', ['get', 'icao24'], icao] as never); } catch { /* style not settled */ }
       }
     });
-    const container = containerRef.current;
-    if (container) {
-      try { map.setPadding({ top: Math.round(container.clientHeight * COCKPIT_TOP_PADDING_FRACTION), bottom: 0, left: 0, right: 0 }); } catch { /* mid-teardown */ }
-    }
+    /* Framing (lib/cockpit-pfd): the glass PFD band occupies the bottom
+       of the screen, so the map pads for it — the aircraft is framed in
+       the clear area above the instruments, low in that area, with the
+       world ahead filling the stage, never behind the glass. The band
+       is measured in the DOM when it can be (its height rides the
+       safe-area inset); the shipped band heights are the fallback.
+       Recomputed on resize — a phone rotating mid-ride reframes too. */
+    const applyRidePadding = () => {
+      const container = containerRef.current;
+      if (!container) return;
+      let occupiedBottom = (container.clientWidth >= 768 ? PFD_BAND_HEIGHT_DESKTOP_PX : PFD_BAND_HEIGHT_MOBILE_PX) + 18;
+      const band = document.querySelector('[data-cockpit-band]');
+      if (band) {
+        const bandRect = band.getBoundingClientRect();
+        const boxRect = container.getBoundingClientRect();
+        if (bandRect.height > 0) occupiedBottom = Math.max(24, Math.round(boxRect.bottom - bandRect.top) + 10);
+      }
+      const padding = cockpitRidePadding(container.clientHeight, occupiedBottom);
+      try { map.setPadding({ top: padding.top, bottom: padding.bottom, left: 0, right: 0 }); } catch { /* mid-teardown */ }
+    };
+    applyRidePadding();
+    window.addEventListener('resize', applyRidePadding);
 
     const start = map.getCenter();
     const smoother = createFollowSmoother({ lat: start.lat, lng: start.lng, bearingDeg: map.getBearing() });
@@ -3202,6 +3262,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     return () => {
       cockpitActiveRef.current = false;
+      window.removeEventListener('resize', applyRidePadding);
       cancelAnimationFrame(raf);
       clearInterval(fixTimer);
       map.off('dragstart', onGesture);

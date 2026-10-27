@@ -13,6 +13,7 @@ import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpenin
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
 import { createViewHistory } from '@/lib/view-history';
 import { COCKPIT_IDLE, cockpitReducer } from '@/lib/cockpit';
+import { effectiveRideStyle, fullscreenTransition } from '@/lib/cockpit-pfd';
 import LiveCounterStrip from '@/components/LiveCounterStrip';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
@@ -368,6 +369,32 @@ export default function Dashboard() {
   // to it, so a ride never costs the visitor their place on the map.
   const cockpitStateRef = useRef(cockpitState);
   useEffect(() => { cockpitStateRef.current = cockpitState; }, [cockpitState]);
+  const ridingNow = cockpitState.status === 'riding';
+
+  /* Fullscreen ride (lib/cockpit-pfd): while a ride owns the screen the
+     page asks the browser for its fullscreen and gives it back when the
+     ride ends — where the platform supports the call. On iPhone Safari
+     element fullscreen doesn't exist; the request simply never happens
+     and the chrome-hidden ride IS the fullscreen. Esc mid-ride is the
+     visitor's choice: nothing re-asks until the next ride. */
+  const fsWasRidingRef = useRef(false);
+  useEffect(() => {
+    const action = fullscreenTransition(
+      fsWasRidingRef.current,
+      ridingNow,
+      typeof document !== 'undefined' && !!document.fullscreenElement,
+    );
+    fsWasRidingRef.current = ridingNow;
+    try {
+      if (action === 'request') {
+        const p = document.documentElement.requestFullscreen?.() as unknown as Promise<void> | undefined;
+        p?.catch?.(() => { /* no gesture / unsupported — the hidden chrome is the fullscreen */ });
+      } else if (action === 'exit') {
+        const p = document.exitFullscreen?.() as unknown as Promise<void> | undefined;
+        p?.catch?.(() => { /* already gone */ });
+      }
+    } catch { /* fullscreen is a garnish, never a failure */ }
+  }, [ridingNow]);
 
   const enterCockpit = useCallback((f: { icao24: string; callsign?: string }) => {
     if (!f?.icao24) return;
@@ -669,6 +696,16 @@ export default function Dashboard() {
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>('idle');
   const [terrainRetry, setTerrainRetry] = useState(0);
   const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('dark');
+  /* Satellite by default in a cockpit ride (lib/cockpit-pfd): the map
+     shows the effective style, never a mutated visitor choice — so the
+     moment a ride ends, the visitor's own basemap is simply what's
+     shown again, exactly as their view is restored. If the imagery
+     tiles fail mid-ride (the map probes and reports it), the ride
+     falls back to that same previous style rather than a blank map. */
+  const [rideSatFailed, setRideSatFailed] = useState(false);
+  useEffect(() => { if (!ridingNow) setRideSatFailed(false); }, [ridingNow]);
+  const handleRideSatelliteFailed = useCallback(() => setRideSatFailed(true), []);
+  const effectiveMapStyle = effectiveRideStyle(ridingNow, rideSatFailed, mapStyle);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [drawnPolygons, setDrawnPolygons] = useState<DrawnShape[]>([]);
   const [demoMode, setDemoMode] = useState(false);
@@ -2081,7 +2118,8 @@ export default function Dashboard() {
           terrainRetry={terrainRetry}
           onTerrainStatusChange={setTerrainStatus}
           onLayerOff={key => setActiveLayers(prev => ({ ...prev, [key]: false }))}
-          mapStyle={mapStyle === 'satellite' ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' : 'dark'} 
+          mapStyle={effectiveMapStyle === 'satellite' ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' : 'dark'}
+          onCockpitSatelliteFailed={handleRideSatelliteFailed}
           onEntityClick={handleEntityClick} 
           onMouseCoords={handleMouseCoords} 
           onRightClick={handleRightClick} 
@@ -2265,7 +2303,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── MAP VIEW CONTROLS ── */}
+      {/* ── MAP VIEW CONTROLS ── (hidden while a cockpit ride owns the screen) */}
+      {!ridingNow && (<>
       <motion.div
         data-hud
         initial={{ opacity: 0, y: 20 }} animate={revealed ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }} transition={hudIn(0.45)}
@@ -2349,6 +2388,7 @@ export default function Dashboard() {
           </div>
         </motion.div>
       )}
+      </>)}
 
 
 
@@ -2764,8 +2804,8 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* ═══ MOBILE UI ═══ */}
-      {isMobile && (
+      {/* ═══ MOBILE UI ═══ (the bottom nav hides while a cockpit ride owns the screen) */}
+      {isMobile && !ridingNow && (
         <>
           {/* Mobile Bottom Navigation */}
           <div className="mobile-nav">
@@ -2947,7 +2987,7 @@ export default function Dashboard() {
           deep on a tablet. A floating button puts it on the map itself —
           no drawer to open. Hidden while a drawer, the planner, or
           guidance is open, and until the HUD reveals. */}
-      {shouldShowRouletteFab({ isMobile, mobilePanel, showDirections, navSession }) && (
+      {shouldShowRouletteFab({ isMobile, mobilePanel, showDirections, navSession }) && !ridingNow && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: revealed ? 1 : 0 }} transition={hudIn(0.3)} className="fixed z-[300] pointer-events-auto" style={{ bottom: 'calc(68px + env(safe-area-inset-bottom, 0px))', right: '12px' }}>
           <button onClick={takeMeSomewhereLive} aria-label="Take me somewhere live" title={roulette.title} className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-primary)] bg-[var(--bg-panel)] shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
             <span className="relative block">
@@ -2964,7 +3004,7 @@ export default function Dashboard() {
       {/* The mirror of the roulette FAB, on the left: Back has to be one tap
           on a tablet too, with no drawer to open. Dimmed while there is
           nowhere to go back to, like the desktop strip button. */}
-      {isMobile && !mobilePanel && !showDirections && !navSession && (
+      {isMobile && !ridingNow && !mobilePanel && !showDirections && !navSession && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: revealed ? 1 : 0 }} transition={hudIn(0.3)} className="fixed z-[300] pointer-events-auto" style={{ bottom: 'calc(68px + env(safe-area-inset-bottom, 0px))', left: '12px' }}>
           <button onClick={goBackView} disabled={!canGoBack} aria-label="Back to previous view" title={canGoBack ? 'Back — return to the previous view' : 'Back — no previous view yet'} className={`flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-primary)] bg-[var(--bg-panel)] shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-2xl ${canGoBack ? '' : 'opacity-35'}`}>
             <ArrowLeft className="h-5 w-5 text-[var(--gold-primary)]" />
@@ -2973,7 +3013,7 @@ export default function Dashboard() {
       )}
 
       {/* ── BOTTOM CURSOR INFO (desktop) ── */}
-      {!isMobile && (
+      {!isMobile && !ridingNow && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: revealed ? 1 : 0 }} transition={hudIn(0.6)} className="desktop-only absolute bottom-8 z-[200] pointer-events-auto" style={{ left: '72px' }}>
           <div className="flex items-center gap-5 text-[9px] font-mono tracking-widest text-[var(--text-muted)] opacity-60">
             <div className="flex gap-2 items-center" title="Cursor coordinates (hover over map)">
@@ -3146,13 +3186,15 @@ export default function Dashboard() {
       {/* Keyboard Shortcuts Overlay */}
       <KeyboardShortcuts />
 
-      {/* ── GLOBAL STATUS TICKER (bottom) ── */}
-      <div data-hud><GlobalStatusBar revealed={revealed} /></div>
+      {/* ── GLOBAL STATUS TICKER (bottom) — hidden while riding ── */}
+      {!ridingNow && <div data-hud><GlobalStatusBar revealed={revealed} /></div>}
 
       {/* Shortcut hint — more visible */}
+      {!ridingNow && (
       <div className="desktop-only absolute bottom-[26px] right-5 z-[200] pointer-events-none text-[9px] font-mono text-[var(--text-muted)] opacity-50 tracking-widest" title="Press ? to see all keyboard shortcuts">
         Press <span className="text-[var(--gold-primary)] opacity-80">?</span> for shortcuts · <span className="text-[var(--gold-primary)] opacity-80">F</span> fullscreen · <span className="text-[var(--gold-primary)] opacity-80">R</span> reset view
       </div>
+      )}
 
 
     </main>
