@@ -24,6 +24,10 @@ import {
   cockpitRidePadding, rideSkySpec, satelliteTileUrl,
 } from '@/lib/cockpit-pfd';
 import { RIDE_WEDGE_LAYER_ID, createRideWedgeLayer } from '@/lib/ride-wedge-layer';
+import {
+  buildRoutePath, sampleRoute, flownCoords, routeFlightDurationMs, routeFlightZoom,
+  turnToward, ROUTE_FLIGHT_PITCH, ROUTE_FLIGHT_TURN_DEG_PER_SEC,
+} from '@/lib/route-flight';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -166,6 +170,21 @@ interface OsirisMapProps {
    *  failed the probe) — the page falls the ride back to the visitor's
    *  previous style rather than leaving a blank or broken basemap. */
   onCockpitSatelliteFailed?: () => void;
+  /** Fly-the-route (lib/route-flight): while set, the map's camera tours the
+   *  given route geometry — pitched, bearing following the road. `playing`
+   *  false parks the camera mid-route; `seq` restarts the flight when it
+   *  changes. The page owns start/pause/exit; the map owns the clock. */
+  routeFlight?: { coordinates: [number, number][]; playing: boolean; seq: number } | null;
+  /** Flight progress, 0..1 — throttled, for the page's progress bar. */
+  onRouteFlightProgress?: (fraction: number) => void;
+  /** The flight reached the destination. */
+  onRouteFlightEnd?: () => void;
+  /** The visitor grabbed the map mid-flight (a real gesture) — pause the tour. */
+  onRouteFlightGrab?: () => void;
+  /** Directions is armed to take its next endpoint from a map click. */
+  routePickMode?: boolean;
+  /** A map click while routePickMode is armed. */
+  onRoutePick?: (pt: { lat: number; lng: number }) => void;
   /** A piece of OI's analysis was clicked: an arc ("link:<id>") or a point ("a:<actor>", "e:<event>"…); null for empty map. */
   onOiSelect?: (key: string | null) => void;
   /** The pointer is over a piece of OI's analysis, or has left it. */
@@ -251,7 +270,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -273,6 +292,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   const cockpitTargetRef = useRef(cockpitTarget);
   const cockpitSatFailedRef = useRef(onCockpitSatelliteFailed);
   const probedSatelliteRideRef = useRef<string | null>(null);
+  /* Fly-the-route: the flight spec + callbacks ride in refs so the rAF loop
+   * (registered once per flight) always reads the latest playing flag
+   * without tearing the clock down on every pause/resume render. */
+  const routeFlightRef = useRef(routeFlight);
+  const routeFlightCbRef = useRef({ onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab });
+  const routePickRef = useRef(routePickMode);
+  const routePickCbRef = useRef(onRoutePick);
   /* The Live Alert pins currently drawn, and the opener for one of them, so
      the feed's locate button can land on a pin and open it. */
   const alertPinsRef = useRef<AlertPinFeature[]>([]);
@@ -3077,6 +3103,161 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Keep the refs the cockpit loop reads pointed at the latest render.
   useEffect(() => { dataRef.current = data; });
   useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; cockpitRouteRef.current = cockpitRoute; cockpitTargetRef.current = cockpitTarget; cockpitSatFailedRef.current = onCockpitSatelliteFailed; if (!cockpitTarget) probedSatelliteRideRef.current = null; });
+  useEffect(() => { routeFlightRef.current = routeFlight; routeFlightCbRef.current = { onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab }; routePickRef.current = routePickMode; routePickCbRef.current = onRoutePick; });
+
+  /* ── FLY THE ROUTE (lib/route-flight) ──
+     A scenic camera tour along the planned route: pitched, bearing
+     following the road, a position marker and the flown-so-far line
+     drawn over the route. No instruments — this is a tour, not the
+     cockpit. The clock lives here; the page owns play/pause/exit via
+     the `playing` flag in a ref, so pausing never restarts the tour.
+     Every map touch is guarded: the style must be loaded before the
+     flight's layers are (re)added, and construction errors degrade
+     to a camera-only flight rather than throwing into the page. */
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !routeFlight) return;
+    const map = mapRef.current;
+    const path = buildRoutePath(routeFlight.coordinates);
+    if (path.coords.length < 2 || path.total <= 0) return;
+    const seq = routeFlight.seq;
+    const durationMs = routeFlightDurationMs(path.total);
+    const zoom = routeFlightZoom(path.total);
+
+    const SRC_POS = 'route-flight-position';
+    const SRC_FLOWN = 'route-flight-flown';
+    const LYR_FLOWN = 'route-flight-flown-line';
+    const LYR_HALO = 'route-flight-pos-halo';
+    const LYR_DOT = 'route-flight-pos-dot';
+    const emptyFc = { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] };
+
+    const ensureLayers = () => {
+      try {
+        if (!map.isStyleLoaded()) return;
+        if (!map.getSource(SRC_FLOWN)) map.addSource(SRC_FLOWN, { type: 'geojson', data: emptyFc });
+        if (!map.getSource(SRC_POS)) map.addSource(SRC_POS, { type: 'geojson', data: emptyFc });
+        if (!map.getLayer(LYR_FLOWN)) {
+          map.addLayer({
+            id: LYR_FLOWN, type: 'line', source: SRC_FLOWN,
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#FFD76A', 'line-width': 3, 'line-opacity': 0.9 },
+          });
+        }
+        if (!map.getLayer(LYR_HALO)) {
+          map.addLayer({
+            id: LYR_HALO, type: 'circle', source: SRC_POS,
+            paint: { 'circle-radius': 13, 'circle-color': '#FFD76A', 'circle-opacity': 0.25 },
+          });
+        }
+        if (!map.getLayer(LYR_DOT)) {
+          map.addLayer({
+            id: LYR_DOT, type: 'circle', source: SRC_POS,
+            paint: {
+              'circle-radius': 6, 'circle-color': '#FFD76A',
+              'circle-stroke-width': 2, 'circle-stroke-color': '#1A1405',
+            },
+          });
+        }
+      } catch { /* style mid-swap — the next frame retries */ }
+    };
+    const teardown = () => {
+      try {
+        [LYR_DOT, LYR_HALO, LYR_FLOWN].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
+        [SRC_POS, SRC_FLOWN].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
+      } catch { /* map already gone */ }
+    };
+    const setData = (id: string, features: GeoJSON.Feature[]) => {
+      try {
+        const src = map.getSource(id) as maplibregl.GeoJSONSource | undefined;
+        src?.setData({ type: 'FeatureCollection', features });
+      } catch { /* style mid-swap */ }
+    };
+
+    let raf = 0;
+    let travelledMs = 0;
+    let lastTs: number | null = null;
+    let lastProgressAt = 0;
+    let lastSourceDist = -1;
+    let ended = false;
+    const startPose = sampleRoute(path, 0);
+    let bearing = startPose ? startPose.bearing : map.getBearing();
+
+    const grab = () => {
+      const spec = routeFlightRef.current;
+      if (spec && spec.seq === seq && spec.playing) routeFlightCbRef.current.onRouteFlightGrab?.();
+    };
+    const canvas = map.getCanvas();
+    canvas.addEventListener('pointerdown', grab);
+    canvas.addEventListener('wheel', grab, { passive: true });
+
+    const tick = (ts: number) => {
+      raf = requestAnimationFrame(tick);
+      const spec = routeFlightRef.current;
+      if (!spec || spec.seq !== seq) return; // a newer flight (or exit) owns the camera now
+      if (lastTs === null) lastTs = ts;
+      const dt = Math.min(100, ts - lastTs);
+      lastTs = ts;
+      if (!spec.playing || ended) return;
+
+      travelledMs += dt;
+      const fraction = Math.min(1, travelledMs / durationMs);
+      const distance = fraction * path.total;
+      const pose = sampleRoute(path, distance);
+      if (!pose) return;
+      bearing = turnToward(bearing, pose.bearing, (ROUTE_FLIGHT_TURN_DEG_PER_SEC * dt) / 1000);
+      try {
+        map.jumpTo({ center: [pose.lng, pose.lat], bearing, pitch: ROUTE_FLIGHT_PITCH, zoom });
+      } catch { /* map mid-teardown */ }
+
+      ensureLayers();
+      if (Math.abs(distance - lastSourceDist) >= 3 || fraction >= 1) {
+        lastSourceDist = distance;
+        setData(SRC_POS, [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [pose.lng, pose.lat] } }]);
+        const flown = flownCoords(path, distance);
+        setData(SRC_FLOWN, flown.length > 1
+          ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: flown } }]
+          : []);
+      }
+      if (ts - lastProgressAt >= 150 || fraction >= 1) {
+        lastProgressAt = ts;
+        routeFlightCbRef.current.onRouteFlightProgress?.(fraction);
+      }
+      if (fraction >= 1) {
+        ended = true;
+        routeFlightCbRef.current.onRouteFlightEnd?.();
+      }
+    };
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      canvas.removeEventListener('pointerdown', grab);
+      canvas.removeEventListener('wheel', grab);
+      teardown();
+    };
+    // The flight is keyed by seq: a new seq is a new tour of (possibly) the
+    // same road. `playing` deliberately is NOT a dependency — the loop
+    // reads it from the ref so pause/resume never resets the clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, routeFlight?.seq, routeFlight?.coordinates]);
+
+  /* ── ROUTE ENDPOINT PICKING ──
+     While Directions is armed, the next map click is an endpoint, not an
+     entity selection: the canvas wears a crosshair and clicks report up. */
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !routePickMode) return;
+    const map = mapRef.current;
+    const canvas = map.getCanvas();
+    const prevCursor = canvas.style.cursor;
+    canvas.style.cursor = 'crosshair';
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      routePickCbRef.current?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+    };
+    map.on('click', onClick);
+    return () => {
+      map.off('click', onClick);
+      try { canvas.style.cursor = prevCursor; } catch { /* map gone */ }
+    };
+  }, [mapReady, routePickMode]);
 
   /* ── COCKPIT SKY (lib/cockpit-pfd) ──
      At the ride's 76° pitch the ground plane runs out before the top

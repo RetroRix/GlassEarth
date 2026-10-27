@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import {
   X, Car, Footprints, Bike, ArrowUpDown, MapPin, Route,
   CornerUpRight, CornerUpLeft, ArrowUp, RotateCw, Merge,
-  LocateFixed, Crosshair, Clock, Plus, Trash2, SlidersHorizontal, Mountain, Navigation, Play,
+  LocateFixed, Crosshair, Clock, Plus, Trash2, SlidersHorizontal, Mountain, Navigation, Play, Plane,
   AlertTriangle, Loader2, type LucideIcon,
 } from 'lucide-react';
 import { searchPlaces, type GeoResult } from '@/lib/geosearch';
@@ -92,6 +92,12 @@ interface DirectionsBarProps {
   onStartNavigation?: (route: RouteResult, destinationLabel: string, plan: TripPlan) => void;
   /** A destination to open with, handed over from Search ("Directions to here"). */
   initialTo?: Place | null;
+  /** Start the scenic Fly-the-Route tour (lib/route-flight) of the chosen route. */
+  onFlyRoute?: (route: RouteResult, fromLabel: string, toLabel: string) => void;
+  /** A point the visitor clicked on the map while endpoint picking was armed. */
+  pickedPoint?: { lat: number; lng: number; ts: number } | null;
+  /** Endpoint picking armed/disarmed — the parent tells the map to capture clicks and wear a crosshair. */
+  onPickModeChange?: (armed: boolean) => void;
 }
 
 const MODES = [
@@ -443,7 +449,7 @@ function IconBtn({ children, label, onClick, on, className = '' }: { children: R
   );
 }
 
-export default function DirectionsBar({ onRoute, onLocate, onClose, center = null, onLiveLocation, onActiveSegment, onFollowChange, onStartNavigation, initialTo = null }: DirectionsBarProps) {
+export default function DirectionsBar({ onRoute, onLocate, onClose, center = null, onLiveLocation, onActiveSegment, onFollowChange, onStartNavigation, initialTo = null, onFlyRoute, pickedPoint = null, onPickModeChange }: DirectionsBarProps) {
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState(initialTo?.label ?? '');
   const [from, setFrom] = useState<Place | null>(null);
@@ -464,6 +470,8 @@ export default function DirectionsBar({ onRoute, onLocate, onClose, center = nul
   const [avoid, setAvoid] = useState({ tolls: false, highways: false, ferries: false });
   const [showOptions, setShowOptions] = useState(false);
   const [recent, setRecent] = useState<RecentPlace[]>(() => (typeof window === 'undefined' ? [] : loadRecent()));
+  /** Endpoint picking: which end the next map click fills, or null when disarmed. */
+  const [picking, setPicking] = useState<'from' | 'to' | null>(null);
   const watchId = useRef<number | null>(null);
 
   /** Remember a place picked for the route, for the next time a field is empty. */
@@ -622,6 +630,58 @@ export default function DirectionsBar({ onRoute, onLocate, onClose, center = nul
     else { setFromText(p.label); pickFrom(p); }
   };
 
+  /* ── pick an endpoint on the map ──
+     Arm, then click twice: the first click fills the start (or the
+     destination, when a start already exists), the second completes
+     the pair and the route plans itself. */
+  const pickCbRef = useRef(onPickModeChange);
+  useEffect(() => { pickCbRef.current = onPickModeChange; });
+  useEffect(() => () => { pickCbRef.current?.(false); }, []);
+
+  const armPick = useCallback(() => {
+    setPicking(!from ? 'from' : !to ? 'to' : 'from');
+    onPickModeChange?.(true);
+  }, [from, to, onPickModeChange]);
+
+  const disarmPick = useCallback(() => {
+    setPicking(null);
+    onPickModeChange?.(false);
+  }, [onPickModeChange]);
+
+  const lastPickedTs = useRef(0);
+  useEffect(() => {
+    if (!picking || !pickedPoint || pickedPoint.ts === lastPickedTs.current) return;
+    lastPickedTs.current = pickedPoint.ts;
+    const place: Place = {
+      label: `${pickedPoint.lat.toFixed(5)}, ${pickedPoint.lng.toFixed(5)}`,
+      lat: pickedPoint.lat,
+      lng: pickedPoint.lng,
+      kind: 'coordinate',
+      context: 'Dropped pin',
+    };
+    if (picking === 'from') {
+      setFromText(place.label);
+      pickFrom(place);
+      setPicking('to');
+    } else {
+      setToText(place.label);
+      pickTo(place);
+      disarmPick();
+    }
+    // pickFrom/pickTo read the other end from state captured this render —
+    // exactly the pair the visitor just completed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedPoint, picking]);
+
+  /** The current view centre as the start — no searching, no locating. */
+  const useMapCentre = useCallback(() => {
+    if (!center) return;
+    const place: Place = { label: 'Map centre', lat: center.lat, lng: center.lng, kind: 'coordinate' };
+    setFromText(place.label);
+    setFrom(place);
+    if (to) runRoute(place, to, mode, stops(), avoid);
+  }, [center, to, mode, runRoute, stops, avoid]);
+
   /** Empty one end of the route: the route goes with it. */
   const clearEnd = (end: 'from' | 'to') => {
     if (end === 'from') { setFrom(null); setFromText(''); } else { setTo(null); setToText(''); }
@@ -755,11 +815,23 @@ export default function DirectionsBar({ onRoute, onLocate, onClose, center = nul
           className="h-7 pl-1.5 pr-2.5 rounded-md flex items-center gap-1.5 text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--gold-light)] hover:bg-white/[0.04] transition-colors">
           <Plus className="w-3.5 h-3.5" /> Add stop
         </button>
+        <button onClick={() => (picking ? disarmPick() : armPick())} aria-pressed={Boolean(picking)}
+          className={`h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11.5px] transition-colors ${picking ? 'text-[var(--gold-light)] bg-[rgba(var(--gold-rgb),0.08)]' : 'text-[var(--text-secondary)] hover:text-[var(--gold-light)] hover:bg-white/[0.04]'}`}>
+          <Crosshair className="w-3.5 h-3.5" /> {picking ? 'Picking…' : 'Pick on map'}
+        </button>
         <button onClick={() => setShowOptions((o) => !o)} aria-expanded={showOptions}
           className={`ml-auto h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11.5px] transition-colors ${showOptions || avoiding ? 'text-[var(--gold-light)] bg-[rgba(var(--gold-rgb),0.08)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-heading)] hover:bg-white/[0.04]'}`}>
           <SlidersHorizontal className="w-3.5 h-3.5" /> Options{avoiding ? ` · ${avoiding}` : ''}
         </button>
       </div>
+
+      {picking && (
+        <p className="px-4 pb-2.5 -mt-1 text-[11.5px] text-[var(--gold-light)] flex-shrink-0" role="status">
+          Click the map to set the {picking === 'from' ? 'start' : 'destination'}
+          {picking === 'from' ? ' — then click again for the destination.' : '.'}{' '}
+          <button onClick={disarmPick} className="underline underline-offset-2 text-[var(--text-secondary)] hover:text-[var(--text-heading)]">Cancel</button>
+        </p>
+      )}
 
       {/* ── how ── */}
       <div className="px-3 pb-3 flex-shrink-0">
@@ -835,6 +907,18 @@ export default function DirectionsBar({ onRoute, onLocate, onClose, center = nul
                     </span>
                   </button>
                 )}
+                {!from && center && (
+                  <button onClick={useMapCentre}
+                    className="group flex items-center gap-3 w-full rounded-lg border border-[var(--border-secondary)] bg-white/[0.02] px-3 py-2.5 text-left transition-colors hover:border-[var(--border-active)] hover:bg-[rgba(var(--gold-rgb),0.05)]">
+                    <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(var(--gold-rgb),0.12)' }}>
+                      <MapPin className="w-4 h-4 text-[var(--gold-light)]" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[13px] text-[var(--text-heading)]">Start from the map centre</span>
+                      <span className="block text-[11px] text-[var(--text-muted)]">{to ? `Then the route to ${to.label}` : 'Route from where the map is looking'}</span>
+                    </span>
+                  </button>
+                )}
                 {locateError && <p className="px-1 text-[11px] text-[var(--gold-light)]">{locateError}</p>}
                 {recent.length > 0 && (
                   <div>
@@ -890,6 +974,9 @@ export default function DirectionsBar({ onRoute, onLocate, onClose, center = nul
                     <span>Arrive {arrivalTime(route.duration)}</span>
                   </div>
                   {via && <div className="mt-0.5 text-[11.5px] text-[var(--text-muted)] truncate">via {via}</div>}
+                  <div className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">
+                    Route via {route.provider === 'osrm' ? 'OSRM' : 'Valhalla'} · {MODES.find((m) => m.id === route.mode)?.label ?? route.mode} — distance &amp; time are the engine&rsquo;s estimates
+                  </div>
                 </div>
                 {(route.hasToll || route.hasHighway || route.hasFerry) && (
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -906,6 +993,13 @@ export default function DirectionsBar({ onRoute, onLocate, onClose, center = nul
                   avoid: Object.entries(avoid).filter(([, on]) => on).map(([k]) => k),
                 })} className="tool-btn-primary w-full mt-3">
                   <Play className="w-4 h-4" fill="currentColor" /> Start navigation
+                </button>
+              )}
+
+              {onFlyRoute && (
+                <button onClick={() => onFlyRoute(route, from?.label || 'Start', to?.label || 'Destination')}
+                  className="w-full mt-2 h-10 rounded-lg border border-[var(--border-secondary)] flex items-center justify-center gap-2 text-[12.5px] text-[var(--text-secondary)] hover:text-[var(--gold-light)] hover:border-[var(--border-active)] transition-colors">
+                  <Plane className="w-4 h-4" /> Fly the route
                 </button>
               )}
             </div>

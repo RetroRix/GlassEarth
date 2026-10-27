@@ -20,6 +20,7 @@ import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
 import SearchBar from '@/components/SearchBar';
 import DirectionsBar, { type RouteResult, type LiveLocation, type TripPlan } from '@/components/DirectionsBar';
+import RouteFlightBar from '@/components/RouteFlightBar';
 import NavigationView from '@/components/NavigationView';
 import FlightWatchPanel, { type WatchedFlight, type FlightTelemetry, type AircraftDetail, type Airport } from '@/components/FlightWatchPanel';
 import CockpitOSD, { CockpitEndedNotice, type CockpitFlightRecord } from '@/components/CockpitOSD';
@@ -305,6 +306,23 @@ export default function Dashboard() {
     }) | null
   >(null);
   const [liveLocation, setLiveLocation] = useState<LiveLocation | null>(null);
+  /* Fly the Route (lib/route-flight): a scenic camera tour of the planned
+     route. The page owns the session (labels, play state, the view to
+     restore); the map owns the clock. */
+  const [routeFlight, setRouteFlight] = useState<{
+    coordinates: [number, number][];
+    fromLabel: string;
+    toLabel: string;
+    playing: boolean;
+    seq: number;
+    savedView: { lat: number; lng: number; zoom: number; bearing: number; pitch: number };
+  } | null>(null);
+  const [routeFlightProgress, setRouteFlightProgress] = useState(0);
+  const routeFlightRef = useRef<typeof routeFlight>(null);
+  useEffect(() => { routeFlightRef.current = routeFlight; }, [routeFlight]);
+  /* Directions endpoint picking: armed → map clicks become endpoints. */
+  const [routePickArmed, setRoutePickArmed] = useState(false);
+  const [pickedPoint, setPickedPoint] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   const [followUser, setFollowUser] = useState(false);
   const [navSession, setNavSession] = useState<
     { route: RouteResult; label: string; key: number; plan: TripPlan } | null
@@ -418,6 +436,44 @@ export default function Dashboard() {
     dispatchCockpit({ type: 'EXIT' });
     const sv = st.savedView;
     setFlyToLocation({ lat: sv.lat, lng: sv.lng, zoom: sv.zoom, bearing: sv.bearing, pitch: sv.pitch, duration: 1800, ts: Date.now() });
+  }, []);
+
+  /* ── Fly the Route session ── */
+  const startRouteFlight = useCallback((route: RouteResult, fromLabel: string, toLabel: string) => {
+    const coords = route.geometry?.coordinates;
+    if (!coords || coords.length < 2) return;
+    const mv = mapViewRef.current;
+    setRouteFlightProgress(0);
+    setRouteFlight({
+      coordinates: coords,
+      fromLabel,
+      toLabel,
+      playing: true,
+      seq: Date.now(),
+      savedView: { lat: mv.latitude, lng: mv.longitude, zoom: mv.zoom, bearing: mv.bearing, pitch: mv.pitch },
+    });
+    // The planner steps aside for the tour; the route line stays drawn
+    // (it lives in activeRoute, not in the panel).
+    setShowDirections(false);
+    setRoutePickArmed(false);
+  }, []);
+
+  const exitRouteFlight = useCallback(() => {
+    const f = routeFlightRef.current;
+    if (f) {
+      const sv = f.savedView;
+      setFlyToLocation({ lat: sv.lat, lng: sv.lng, zoom: sv.zoom, bearing: sv.bearing, pitch: sv.pitch, duration: 1800, ts: Date.now() });
+    }
+    setRouteFlight(null);
+    setRouteFlightProgress(0);
+  }, []);
+
+  const toggleRouteFlightPlay = useCallback(() => {
+    setRouteFlight((f) => (f ? { ...f, playing: !f.playing } : f));
+  }, []);
+
+  const pauseRouteFlight = useCallback(() => {
+    setRouteFlight((f) => (f && f.playing ? { ...f, playing: false } : f));
   }, []);
 
   const handleCockpitGrab = useCallback(() => dispatchCockpit({ type: 'GRAB' }), []);
@@ -2167,6 +2223,12 @@ export default function Dashboard() {
           cockpitRoute={cockpitState.status === 'riding' ? cockpitRoute : null}
           onCockpitGrab={handleCockpitGrab}
           onCockpitLost={handleCockpitLost}
+          routeFlight={routeFlight ? { coordinates: routeFlight.coordinates, playing: routeFlight.playing, seq: routeFlight.seq } : null}
+          onRouteFlightProgress={setRouteFlightProgress}
+          onRouteFlightEnd={exitRouteFlight}
+          onRouteFlightGrab={pauseRouteFlight}
+          routePickMode={routePickArmed}
+          onRoutePick={(pt) => setPickedPoint({ ...pt, ts: Date.now() })}
           navigating={Boolean(navSession)}
           drawMode={drawMode}
           onDrawProgress={setDrawProgress}
@@ -2257,12 +2319,28 @@ export default function Dashboard() {
                 setNavSession({ route: r, label, key: Date.now(), plan });
                 setFollowUser(true);
               }}
+              onFlyRoute={startRouteFlight}
+              pickedPoint={pickedPoint}
+              onPickModeChange={setRoutePickArmed}
               onLocate={(lat, lng, zoom) => setFlyToLocation({ lat, lng, zoom, ts: Date.now() })}
               onClose={() => { setShowDirections(false); setActiveRoute(null); setRouteTarget(null); }}
             />
           </motion.div>
         )}
       </div>
+
+      {/* ── FLY THE ROUTE — the tour's own chrome: progress, pause, and the
+          exit that restores the view the visitor had before the flight ── */}
+      {routeFlight && (
+        <RouteFlightBar
+          fromLabel={routeFlight.fromLabel}
+          toLabel={routeFlight.toLabel}
+          progress={routeFlightProgress}
+          playing={routeFlight.playing}
+          onTogglePlay={toggleRouteFlightPlay}
+          onExit={exitRouteFlight}
+        />
+      )}
 
       {/* ── SEARCH — a spotlight at the top of the map: places, addresses, coordinates ── */}
       <AnimatePresence>
