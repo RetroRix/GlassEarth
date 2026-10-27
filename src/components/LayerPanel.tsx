@@ -72,6 +72,7 @@ const LAYER_GROUPS: LayerGroupDef[] = [
       { key: 'noaa_radar', label: 'NOAA Radar', description: 'nowCOAST MRMS mosaic · CONUS · ~4 min', dataKey: '' },
       { key: 'goes_ir', label: 'Satellite IR', description: 'NOAA GOES longwave IR · nowCOAST · 5 min', dataKey: '' },
       { key: 'lightning', label: 'Lightning', description: 'Strike density · NLDN / GLD360 · 15 min', dataKey: '' },
+      { key: 'date_compare', label: 'Date Compare', description: 'NASA HLS satellite · before/after swipe · last 30 days', dataKey: '' },
     ],
   },
   {

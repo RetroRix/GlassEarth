@@ -816,6 +816,10 @@ export default function Dashboard() {
     lightning: false,
     /* NHC/CPHC tropical cyclones: forecast cone + track. Off by default. */
     cyclones: false,
+    /* Satellite date comparison (NASA HLS via GIBS): A/B swipe of daily
+       30 m imagery over the last 30 days — see lib/date-compare and
+       DateCompareBar. Off until asked for, like the other imagery. */
+    date_compare: false,
     /* Their time boxes at the bottom left — see WindBar and RainBar. On, so
        turning the layer on brings its controls; off, the layer shows now. */
     wind_controls: true,
