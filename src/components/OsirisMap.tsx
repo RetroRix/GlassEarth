@@ -3115,6 +3115,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         for (const bg of rideSkyRestoreRef.current.backgrounds) {
           try { map.setPaintProperty(bg.id, 'background-color', spec['horizon-color']); } catch { /* layer gone */ }
         }
+        /* TEMP DIAGNOSTIC (sky wedge probe — remove before final): */
+        try {
+          const w = window as unknown as { __skyRideProbe?: unknown };
+          w.__skyRideProbe = {
+            ids: rideSkyRestoreRef.current.backgrounds.map((b) => b.id),
+            before: rideSkyRestoreRef.current.backgrounds.map((b) => String(b.color)),
+            after: rideSkyRestoreRef.current.backgrounds.map((b) => String(map.getPaintProperty(b.id, 'background-color'))),
+            skySpec: map.getSky(),
+            styleLayers: (map.getStyle()?.layers ?? []).slice(0, 3).map((l) => `${l.id}:${l.type}`),
+          };
+        } catch { /* probe only */ }
       } else if (rideSkyRestoreRef.current.captured) {
         const { sky: previous, backgrounds } = rideSkyRestoreRef.current;
         rideSkyRestoreRef.current = { captured: false, sky: undefined, backgrounds: [] };
