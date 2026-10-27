@@ -198,13 +198,26 @@ export interface DcResolved {
  * Resolve one side: walk the snap candidates nearest-first; at each
  * date try Sentinel-2, then Landsat. The first real pass wins. Null when
  * no date in the window covers the view.
+ *
+ * Candidates are probed in small parallel batches (a stalled or slow
+ * tile host must not serialize thirty dates of HEAD requests), but the
+ * winner is chosen strictly by candidate order — batching changes how
+ * fast the answer arrives, never which answer is given.
  */
 export async function resolveSide(picked: string, w: DcWindow, tiles: DcTile[], probe: DcProbe): Promise<DcResolved | null> {
   if (!tiles.length) return null;
-  for (const date of snapCandidates(picked, w)) {
-    for (const sensor of DC_SENSOR_ORDER) {
-      if (await probe(sensor, date, tiles)) {
-        return { picked, actual: date, sensor, snappedDays: Math.abs(diffDays(picked, date)) };
+  const candidates = snapCandidates(picked, w);
+  const BATCH = 3;
+  for (let i = 0; i < candidates.length; i += BATCH) {
+    const batch = candidates.slice(i, i + BATCH);
+    const hits = await Promise.all(batch.flatMap(date =>
+      DC_SENSOR_ORDER.map(async sensor => ({ date, sensor, ok: await probe(sensor, date, tiles) })),
+    ));
+    for (const date of batch) {
+      for (const sensor of DC_SENSOR_ORDER) {
+        if (hits.find(h => h.date === date && h.sensor === sensor)?.ok) {
+          return { picked, actual: date, sensor, snappedDays: Math.abs(diffDays(picked, date)) };
+        }
       }
     }
   }
@@ -222,7 +235,11 @@ export function headProbe(fetchFn: typeof fetch = fetch): DcProbe {
   return async (sensor, dateIso, tiles) => {
     const hits = await Promise.all(tiles.map(async t => {
       try {
-        const res = await fetchFn(gibsTileUrl(sensor, dateIso, t.z, t.x, t.y), { method: 'HEAD' });
+        const res = await fetchFn(gibsTileUrl(sensor, dateIso, t.z, t.x, t.y), {
+          method: 'HEAD',
+          // A stalled probe must read as "no data", never hang the walk.
+          signal: AbortSignal.timeout(10_000),
+        });
         return res.ok && !!res.headers.get('layer-time-actual');
       } catch { return false; }
     }));
