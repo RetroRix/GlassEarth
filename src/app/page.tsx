@@ -822,6 +822,9 @@ export default function Dashboard() {
     /* Launch Library 2 rocket launches: site markers + countdown panel.
        Off until asked for, like the other space layers. */
     launches: false,
+    /* Panoramax street-level photos: dots at zoom 14+, viewer carries the
+       contributor credit + the picture's own licence. Off by default. */
+    street_photos: false,
     /* Satellite date comparison (NASA HLS via GIBS): A/B swipe of daily
        30 m imagery over the last 30 days — see lib/date-compare and
        DateCompareBar. Off until asked for, like the other imagery. */

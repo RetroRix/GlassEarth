@@ -124,6 +124,7 @@ const LAYER_GROUPS: LayerGroupDef[] = [
     layers: [
       { key: 'cctv', label: 'CCTV Cameras', dataKey: 'cameras' },
       { key: 'cctv_previews', label: 'Live Previews', dataKey: '', parent: 'cctv' },
+      { key: 'street_photos', label: 'Street Photos', description: 'Panoramax · crowd-sourced street imagery · zoom 14+', dataKey: '' },
       { key: 'live_news', label: 'Live News Feeds', dataKey: 'live_feeds' },
     ],
   },
