@@ -3194,7 +3194,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const spec = routeFlightRef.current;
       if (!spec || spec.seq !== seq) return; // a newer flight (or exit) owns the camera now
       if (lastTs === null) lastTs = ts;
-      const dt = Math.min(100, ts - lastTs);
+      // The clamp keeps a long stall (background tab, slow first frame)
+      // from teleporting the tour, but stays generous: at the ~4 fps a
+      // software-rendered headless browser manages, a 100 ms cap would
+      // run the clock at a fraction of real time.
+      const dt = Math.min(250, ts - lastTs);
       lastTs = ts;
       if (!spec.playing || ended) return;
 
