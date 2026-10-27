@@ -173,3 +173,32 @@ describe('history for instant playback', () => {
     expect(second.vehicles[0].h).toEqual([[t - 20, 42.36, -71.06]]);
   });
 });
+
+describe('amtraker feeds', () => {
+  const AMTRAK: TransitFeed = {
+    id: 'test-amtrak', provider: 'Amtrak (via Amtraker)', country: 'US', region: 'United States',
+    url: 'https://feeds.example/amtrak.json', format: 'amtraker', defaultMode: 'rail',
+    bbox: [-125.5, 24, -66, 50], center: [-98.5, 39.5], core: [-112, 33, -84, 44], vehiclesAtProbe: 48,
+  };
+
+  it('reads Amtrak through the same reader, as rail, destination and all', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      '1': [{
+        trainNum: 1, trainID: '1-26', routeName: 'Sunset Limited', lat: 29.76, lon: -95.37,
+        velocity: 60, heading: 'W', trainState: 'Active', destName: 'Los Angeles Union',
+        lastValTS: new Date().toISOString(),
+      }],
+    })));
+    const entry = await readFeed(AMTRAK, fetchImpl);
+    expect(entry.ok).toBe(true);
+    expect(entry.vehicles).toHaveLength(1);
+    expect(entry.vehicles[0]).toMatchObject({
+      f: 'test-amtrak', id: '1-26', mode: 'rail', route: 'Sunset Limited', label: '1', dest: 'Los Angeles Union', b: 270,
+    });
+    expect(entry.vehicles[0].s).toBeCloseTo(26.8, 0);
+  });
+
+  it('lists Amtrak among the active feeds, keylessly', () => {
+    expect(activeFeeds({}).some(f => f.id === 'amtrak' && f.format === 'amtraker')).toBe(true);
+  });
+});

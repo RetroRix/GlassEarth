@@ -7,7 +7,9 @@
  * pace the feeds themselves update at and well inside their published limits.
  */
 import { decodeVehicleFeed } from './gtfs-rt';
+import { decodeAmtrakerFeed } from './amtraker';
 import { TRANSIT_FEEDS } from './transit-feeds.generated';
+import { EXTRA_TRANSIT_FEEDS } from './transit-feeds-extra';
 import { KEYED_TRANSIT_FEEDS } from './transit-feeds-keyed';
 import { routeFor, timetableModeFor } from './transit-routes';
 import { unzipFirstEntry } from './zip';
@@ -80,7 +82,7 @@ function withHistory(feedId: string, vehicles: TransitVehicle[], nowS: number): 
  * key is set in the environment.
  */
 export function activeFeeds(env: Record<string, string | undefined> = process.env): TransitFeed[] {
-  return [...TRANSIT_FEEDS, ...KEYED_TRANSIT_FEEDS.filter(f => f.key && env[f.key.env])];
+  return [...TRANSIT_FEEDS, ...EXTRA_TRANSIT_FEEDS, ...KEYED_TRANSIT_FEEDS.filter(f => f.key && env[f.key.env])];
 }
 
 export const FEEDS: TransitFeed[] = activeFeeds();
@@ -138,7 +140,9 @@ function refresh(feed: TransitFeed, fetchImpl: typeof fetch, hit: Entry | undefi
       if (res.status === 401 || res.status === 403) throw new Error(feed.key ? `key refused (HTTP ${res.status})` : `HTTP ${res.status}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = Buffer.from(await res.arrayBuffer());
-      const decoded = decodeVehicleFeed(feed.format === 'zip' ? unzipFirstEntry(body) : body);
+      const decoded = feed.format === 'amtraker'
+        ? decodeAmtrakerFeed(body)
+        : decodeVehicleFeed(feed.format === 'zip' ? unzipFirstEntry(body) : body);
       const area = padded(feed.bbox);
       const feedMode = timetableModeFor(feed) ?? feed.defaultMode;
       const vehicles: TransitVehicle[] = [];
@@ -159,6 +163,7 @@ function refresh(feed: TransitFeed, fetchImpl: typeof fetch, hit: Entry | undefi
           ...(route?.name ? { name: route.name } : {}),
           ...(mode ? { mode } : {}),
           ...(v.label ? { label: v.label } : {}),
+          ...(v.dest ? { dest: v.dest } : {}),
           ...(v.tripId ? { trip: v.tripId } : {}),
           ...(v.timestamp ? { t: v.timestamp } : {}),
           ...(v.occupancy !== undefined ? { occ: v.occupancy } : {}),

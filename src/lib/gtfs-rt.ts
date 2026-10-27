@@ -23,6 +23,8 @@ export interface VehiclePosition {
   directionId?: number;
   /** What the rider sees: a fleet number, or the route and destination on some feeds. */
   label?: string;
+  /** The destination's name, on the feeds that carry one (Amtrak's does). */
+  dest?: string;
   /** When the position was measured, seconds since the epoch. */
   timestamp?: number;
   stopId?: string;

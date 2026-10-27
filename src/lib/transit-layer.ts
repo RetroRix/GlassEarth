@@ -194,6 +194,7 @@ export function attachTransit(map: MlMap, opts: TransitLayerOptions): () => void
     ].join('');
     const cells = [
       cell('ROUTE', routeText, true),
+      cell('DESTINATION', v.dest),
       cell('VEHICLE', v.label ?? v.id),
       cell('STATE', motion.toUpperCase()),
       cell('HEADING', heading !== undefined ? `${compassPoint(heading)} · ${Math.round(heading)}°` : undefined),

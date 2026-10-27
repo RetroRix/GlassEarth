@@ -34,8 +34,12 @@ export interface TransitFeed {
   mdb?: string;
   /** How many vehicles the feed reported when the catalogue was built. */
   vehiclesAtProbe: number;
-  /** The body is a ZIP archive holding the FeedMessage (the UK's nationwide file). */
-  format?: 'zip';
+  /**
+   * The body's shape, when it is not a bare FeedMessage: a ZIP archive
+   * holding one (the UK's nationwide file), or a non-GTFS answer a named
+   * decoder reads instead (Amtrak's, via Amtraker).
+   */
+  format?: 'zip' | 'amtraker';
   /** How long one read is shared, when the feed is too big to read every 20 s. */
   ttlMs?: number;
   /**
@@ -123,6 +127,8 @@ export interface TransitVehicle {
   mode?: TransitMode;
   label?: string;
   trip?: string;
+  /** Where it is going, when the feed says so (Amtrak names it; GTFS-Realtime positions do not). */
+  dest?: string;
   /** Position time, seconds since the epoch. */
   t?: number;
   /** GTFS-Realtime OccupancyStatus. */
