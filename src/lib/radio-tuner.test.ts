@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildDial, formatLongitude, fractionForIndex, hasDialCoords, indexAtFraction,
-  longitudeAtFraction, nextUntriedIndex, stepIndex,
+  buildDial, formatLongitude, fractionForLongitude, hasDialCoords, indexAtFraction,
+  longitudeAtFraction, nextUntriedIndex, stepIndex, type DialStation,
 } from './radio-tuner';
 import type { RadioStation } from './stations';
 
@@ -66,21 +66,36 @@ describe('stepIndex — wrap-around stepping', () => {
   });
 });
 
-describe('needle fractions', () => {
-  it('maps index → fraction and fraction → index as inverses', () => {
-    for (const i of [0, 1, 50, 99, 100]) {
-      expect(indexAtFraction(fractionForIndex(i, 101), 101)).toBe(i);
-    }
+describe('needle fractions — a true longitude scale', () => {
+  const dial = buildDial([TOKYO, LONDON, NYC, EL_PASO]) as DialStation[];
+  // dial order: ELP (-106.49), NYC (-73.97), LON (-0.12), TOK (139.69)
+
+  it('places a longitude on the band linearly', () => {
+    expect(fractionForLongitude(-180)).toBe(0);
+    expect(fractionForLongitude(0)).toBe(0.5);
+    expect(fractionForLongitude(180)).toBe(1);
+    expect(fractionForLongitude(540)).toBe(1);
   });
-  it('clamps drag fractions to the band', () => {
-    expect(indexAtFraction(-0.5, 10)).toBe(0);
-    expect(indexAtFraction(1.7, 10)).toBe(9);
-    expect(indexAtFraction(0.3, 0)).toBe(-1);
+
+  it('lands on the station nearest the needle longitude', () => {
+    expect(indexAtFraction(fractionForLongitude(-100), dial)).toBe(0); // near El Paso
+    expect(indexAtFraction(0.5, dial)).toBe(2); // Greenwich → London
+    expect(indexAtFraction(1, dial)).toBe(3); // far east edge → Tokyo
+    expect(indexAtFraction(0, dial)).toBe(0); // far west edge → El Paso
   });
-  it('puts a one-station dial at the west edge', () => {
-    expect(fractionForIndex(0, 1)).toBe(0);
-    expect(indexAtFraction(0.9, 1)).toBe(0);
+
+  it('round-trips every station on a distinct meridian', () => {
+    dial.forEach((s, i) => {
+      expect(indexAtFraction(fractionForLongitude(s.lng), dial)).toBe(i);
+    });
   });
+
+  it('clamps drag fractions to the band and handles an empty dial', () => {
+    expect(indexAtFraction(-0.5, dial)).toBe(0);
+    expect(indexAtFraction(1.7, dial)).toBe(3);
+    expect(indexAtFraction(0.3, [])).toBe(-1);
+  });
+
   it('reads the needle as a longitude', () => {
     expect(longitudeAtFraction(0)).toBe(-180);
     expect(longitudeAtFraction(0.5)).toBe(0);

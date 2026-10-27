@@ -7,7 +7,7 @@ import {
   loadRadioFavorites, saveRadioFavorites, type RadioStation,
 } from '@/lib/stations';
 import {
-  buildDial, formatLongitude, fractionForIndex, indexAtFraction,
+  buildDial, formatLongitude, fractionForLongitude, indexAtFraction,
   longitudeAtFraction, nextUntriedIndex, stepIndex, type DialStation,
 } from '@/lib/radio-tuner';
 
@@ -159,7 +159,7 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
     const d = dialRef.current;
     setScanFraction(frac);
     if (!d || !d.length) return;
-    const idx = indexAtFraction(frac, d.length);
+    const idx = indexAtFraction(frac, d);
     setScanIndex(idx);
     if (idx >= 0 && idx !== lastScanFlownRef.current) {
       lastScanFlownRef.current = idx;
@@ -181,7 +181,8 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!scanning) return;
     setScanning(false);
-    const idx = indexAtFraction(fractionFromClientX(e.clientX), dialRef.current?.length ?? 0);
+    const d = dialRef.current;
+    const idx = d ? indexAtFraction(fractionFromClientX(e.clientX), d) : -1;
     if (idx >= 0) land(idx, true);
   };
 
@@ -191,7 +192,7 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
     : null;
   const needleFraction = scanning
     ? scanFraction
-    : dial && index >= 0 ? fractionForIndex(index, dial.length) : 0.5;
+    : shown ? fractionForLongitude(shown.lng) : 0.5;
   const isFav = shown ? favUuids.has(shown.uuid) : false;
 
   const toggleFav = (s: RadioStation) =>
@@ -203,7 +204,7 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
       <span
         key={s.uuid}
         className={`absolute top-1/2 h-[3px] w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full ${i === index ? 'bg-[#00E5FF]' : 'bg-white/25'}`}
-        style={{ left: `${fractionForIndex(i, dial.length) * 100}%` }}
+        style={{ left: `${fractionForLongitude(s.lng) * 100}%` }}
       />
     ));
   }, [dial, index]);

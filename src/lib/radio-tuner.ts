@@ -53,17 +53,34 @@ export function stepIndex(current: number, delta: number, count: number): number
   return (((current + delta) % count) + count) % count;
 }
 
-/** Needle position for a dial index: 0 at the far west edge, 1 far east. */
-export function fractionForIndex(index: number, count: number): number {
-  if (count <= 1 || index < 0) return 0;
-  return index / (count - 1);
+/** Needle position for a longitude: 0 at 180° W, 1 at 180° E. The dial is
+    a true longitude scale — the needle sits ON the station's meridian,
+    so clusters (Europe) are dense and oceans are wide, like the planet. */
+export function fractionForLongitude(lng: number): number {
+  const c = Math.min(180, Math.max(-180, lng));
+  return (c + 180) / 360;
 }
 
-/** The dial index nearest a needle fraction (a drag position). */
-export function indexAtFraction(fraction: number, count: number): number {
-  if (count <= 0) return -1;
-  const f = Math.min(1, Math.max(0, fraction));
-  return Math.round(f * (count - 1));
+/**
+ * The dial index nearest a needle fraction: the station whose longitude
+ * is closest to the longitude the needle points at. The dial is sorted
+ * by longitude, so this is a binary search; ties (rooftop networks
+ * sharing a meridian) resolve to the westernmost of the tied stations.
+ */
+export function indexAtFraction(fraction: number, dial: readonly DialStation[]): number {
+  if (!dial.length) return -1;
+  const target = longitudeAtFraction(fraction);
+  let lo = 0;
+  let hi = dial.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (dial[mid].lng < target) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo === 0) return 0;
+  const before = dial[lo - 1];
+  const at = dial[lo];
+  return target - before.lng <= at.lng - target ? lo - 1 : lo;
 }
 
 /** The longitude a needle fraction points at — the dial IS the equator. */
