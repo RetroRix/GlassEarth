@@ -18,9 +18,11 @@ interface CameraViewerProps {
   onLocate?: (lat: number, lng: number) => void;
   /** The OI panel is open on the right: sit beside it, so OI Assist's conversation stays readable while it looks. */
   besideOi?: boolean;
+  /** Fired once per opening when the viewer's own badge first reads LIVE VIDEO — a stream is actually playing. Opening the viewer, or opening a snapshot camera, never fires it. */
+  onLiveVideo?: (camera: any) => void;
 }
 
-export default function CameraViewer({ camera, onClose, onLocate, besideOi = false }: CameraViewerProps) {
+export default function CameraViewer({ camera, onClose, onLocate, besideOi = false, onLiveVideo }: CameraViewerProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -120,6 +122,23 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
     hasSnapshot: Boolean(camera.feed_url),
     placeholder,
   });
+
+  /* Report a genuinely playing stream once per camera opening. Closing
+     the viewer clears the mark, so reopening the same camera can report
+     it again; a camera whose badge never reaches LIVE VIDEO (a still, a
+     placeholder, an external-only feed) never reports at all. */
+  const liveVideoNotifiedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!camera) {
+      liveVideoNotifiedFor.current = null;
+      return;
+    }
+    if (viewerBadge?.kind !== 'live-video' || error) return;
+    const key = String(camera.id);
+    if (liveVideoNotifiedFor.current === key) return;
+    liveVideoNotifiedFor.current = key;
+    onLiveVideo?.(camera);
+  }, [camera, viewerBadge?.kind, error, onLiveVideo]);
 
   useEffect(() => {
     if (!camera) return;

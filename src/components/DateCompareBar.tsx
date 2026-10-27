@@ -70,15 +70,29 @@ function sideLine(side: Side): string {
   return `${base} · NEAREST PASS ${d > 0 ? '+' : '−'}${Math.abs(d)}D FROM PICK`;
 }
 
-export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: {
+export default function DateCompareBar({ mapRef, projection = 'globe', onOff, onSwiped }: {
   mapRef: React.RefObject<MlMap | null>;
   projection?: 'globe' | 'mercator';
   onOff?: () => void;
+  /** Fired once when the visitor actually moves the swipe divider —
+   *  dragging the grip, stepping it with the arrow keys, or using the
+   *  panel's swipe slider. Opening compare never fires it. First-run
+   *  missions listen. */
+  onSwiped?: () => void;
 }) {
   const [win, setWin] = useState<DcWindow | null>(null);
   const [sideA, setSideA] = useState<Side | null>(null);
   const [sideB, setSideB] = useState<Side | null>(null);
   const [split, setSplit] = useState(50);
+  /* The divider starts at 50. A genuine swipe moves it a visible amount
+     from there; the first such move is reported once, however it was made
+     (grip drag, grip arrow keys, or the panel slider all set `split`). */
+  const swipedRef = useRef(false);
+  useEffect(() => {
+    if (swipedRef.current || Math.abs(split - 50) < 2) return;
+    swipedRef.current = true;
+    onSwiped?.();
+  }, [split, onSwiped]);
   const [settings, setSettings] = useState(readSettings);
   const [tuning, setTuning] = useState(false);
   const [zoom, setZoom] = useState(0);

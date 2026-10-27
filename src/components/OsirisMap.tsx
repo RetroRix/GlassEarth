@@ -113,6 +113,8 @@ interface OsirisMapProps {
   onTerrainStatusChange?: (status: TerrainStatus) => void;
   /** Turns a layer off, from the power button on its box (Wind, Rain). */
   onLayerOff?: (key: string) => void;
+  /** The Date Compare divider was genuinely swiped (see DateCompareBar). */
+  onDateCompareSwiped?: () => void;
 
   mapStyle?: string;
   scanTargets?: any[];
@@ -274,7 +276,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -4062,7 +4064,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           )}
           {activeLayers.date_compare && (
             <DateCompareBar mapRef={mapRef} projection={projection}
-              onOff={() => onLayerOff?.('date_compare')} />
+              onOff={() => onLayerOff?.('date_compare')}
+              onSwiped={onDateCompareSwiped} />
           )}
         </div>
       )}

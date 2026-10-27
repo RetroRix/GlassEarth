@@ -6,7 +6,7 @@ import {
   Plane, Satellite, Sun, Moon, AlertTriangle, Camera,
   CloudLightning, CloudSun, Ship, Network, Database, Ghost,
   Flame, Tv, Radio, Mountain, Anchor, Megaphone, SlidersHorizontal, Bus,
-  Pin, PinOff
+  Pin, PinOff, ListChecks
 } from 'lucide-react';
 import StyleStudio from './StyleStudio';
 import BarEdgeHandle from './BarEdgeHandle';
@@ -34,6 +34,9 @@ interface LayerPanelProps {
   rideActive?: boolean;
   /** A layer's live state in a line, shown under its name in place of its description. */
   liveStatus?: Record<string, string>;
+  /** Opens the first-run missions card — the panel's permanent Missions
+   *  entry, there long after the first-run card has been dismissed. */
+  onOpenMissions?: () => void;
 }
 
 interface LayerDef {
@@ -231,7 +234,7 @@ function SubLayerStem() {
   );
 }
 
-function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false }: LayerPanelProps) {
+function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false, onOpenMissions }: LayerPanelProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   /**
    * A pinned group stays open when the pointer leaves. Hover-only flyouts are
@@ -322,6 +325,18 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
   if (isMobile) {
     return (
       <div className="flex flex-col gap-5 py-2">
+        {onOpenMissions && (
+          <button
+            onClick={onOpenMissions}
+            className="flex w-full items-center gap-3 rounded-md border border-[var(--lp-border)] px-2 py-2.5 text-left hover:bg-[var(--lp-hover)] transition-colors"
+          >
+            <ListChecks className="h-4 w-4 shrink-0" style={{ color: 'var(--gold-primary)' }} />
+            <span className="flex-1">
+              <span className="block text-[11px] font-mono uppercase tracking-wider text-[var(--lp-fg-strong)]">Missions</span>
+              <span className="mt-0.5 block text-[9px] text-[var(--lp-fg-faint)]">Five first things to try — each one finishes when you have done it</span>
+            </span>
+          </button>
+        )}
         {visibleGroups.map((group) => (
           <div key={group.label} className="flex flex-col gap-2">
             <div className="text-[10px] font-mono tracking-[0.2em] uppercase text-[var(--lp-fg-head)] border-b border-[var(--lp-border)] pb-1.5">
@@ -623,6 +638,21 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
       <AnimatePresence>
         {studioOpen && <StyleStudio onClose={() => setStudioOpen(false)} />}
       </AnimatePresence>
+
+      {/* Missions — the permanent way back to the first-run card. */}
+      {onOpenMissions && (
+        <button
+          onClick={onOpenMissions}
+          className="w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-500 cursor-pointer"
+          title="Missions — five first things to try, each one a real thing in the app"
+          aria-label="Open missions"
+        >
+          <ListChecks
+            className="transition-all duration-500"
+            style={{ width: 15, height: 15, color: 'rgba(255,255,255,0.35)' }}
+          />
+        </button>
+      )}
 
       {/* Ghost Protocol Toggle */}
       {setTheme && (

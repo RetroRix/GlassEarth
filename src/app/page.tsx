@@ -50,6 +50,8 @@ import StationsPanel from '@/components/StationsPanel';
 import LaunchesPanel from '@/components/LaunchesPanel';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
 import RadioTuner from '@/components/RadioTuner';
+import MissionsCard from '@/components/MissionsCard';
+import type { MissionId } from '@/lib/missions';
 import { loadTvFavorites, type RadioStation, type TvChannel } from '@/lib/stations';
 const TvWall = dynamic(() => import('@/components/TvWall'), { ssr: false });
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
@@ -285,6 +287,33 @@ export default function Dashboard() {
   /* Dead-stream reports from the one playback owner — the Radio Tuner
      listens and auto-skips; nothing else consumes this. */
   const [radioFailure, setRadioFailure] = useState<{ uuid: string; at: number } | null>(null);
+  /* Which surface chose the station now playing — the tuner dial or the
+     Stations panel. The tuner mission cares about the difference, and
+     the playback owner only knows that something is playing, so the
+     attribution is kept here, where the choice is made. */
+  const radioSourceRef = useRef<'tuner' | 'stations' | null>(null);
+  const playRadio = useCallback((station: RadioStation, source: 'tuner' | 'stations') => {
+    radioSourceRef.current = source;
+    setRadioStation(station);
+  }, []);
+
+  /* ── First-run missions (lib/missions) ──
+     The card owns the progress record; this page owns the real events.
+     These stamped signals are how genuine happenings reach the card: a
+     LIVE VIDEO badge in the camera viewer, the audio element actually
+     playing, the Date Compare divider actually moving. Watching a flight
+     and riding in the cockpit need no stamp — the card reads the page's
+     own watched list size and cockpit state, passed as props below. */
+  const [missionsOpenSignal, setMissionsOpenSignal] = useState(0);
+  const [missionLiveVideo, setMissionLiveVideo] = useState<{ cameraId: string; at: number } | null>(null);
+  const [missionRadioPlaying, setMissionRadioPlaying] = useState<{ uuid: string; at: number; source: 'tuner' | 'stations' | null } | null>(null);
+  const [missionCompareSwipedAt, setMissionCompareSwipedAt] = useState<number | null>(null);
+  const handleMissionLiveVideo = useCallback((cam: any) => {
+    setMissionLiveVideo({ cameraId: String(cam?.id ?? ''), at: Date.now() });
+  }, []);
+  const handleMissionCompareSwiped = useCallback(() => {
+    setMissionCompareSwipedAt(Date.now());
+  }, []);
   const [showSpotting, setShowSpotting] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showDrawing, setShowDrawing] = useState(false);
@@ -1553,6 +1582,42 @@ export default function Dashboard() {
     takeMeSomewhereLive();
   }, [dataVersion, takeMeSomewhereLive]);
 
+  /* ── What a mission's “Take me there” does ──
+     Set up the real thing and get out of the way: the flights layer and
+     a busy hub for the two flight missions, the camera roulette for the
+     camera mission, the tuner for the radio mission, Date Compare over
+     a reservoir that visibly changes for the compare mission. It never
+     completes a mission — the card checks one off only when the real
+     event lands (a ride starting, a LIVE VIDEO badge, a tuner landing
+     playing, a divider moving, a watch starting). */
+  const handleMissionAction = useCallback((id: MissionId) => {
+    setMobilePanel(null);
+    switch (id) {
+      case 'cockpit':
+      case 'track':
+        oiGlobe.current?.follow(false);
+        setActiveLayers(prev => (prev.flights ? prev : { ...prev, flights: true }));
+        /* Atlanta — the busiest passenger hub on Earth, so a tappable
+           plane is never far away. */
+        setFlyToLocation({ lat: 33.6407, lng: -84.4277, zoom: 8, duration: 2600, ts: Date.now() });
+        break;
+      case 'camera':
+        takeMeSomewhereLive();
+        break;
+      case 'radio':
+        setShowStations(false); setShowTv(false); setShowSpaceCam(false);
+        setShowMarkets(false); setShowAlerts(false); setShowSpotting(false);
+        setShowTuner(true);
+        break;
+      case 'compare':
+        setActiveLayers(prev => (prev.date_compare ? prev : { ...prev, date_compare: true }));
+        /* Elephant Butte Reservoir, New Mexico — a shoreline that moves
+           between satellite passes, which is the whole point of the tool. */
+        setFlyToLocation({ lat: 33.1514, lng: -107.1768, zoom: 11, duration: 2600, ts: Date.now() });
+        break;
+    }
+  }, [takeMeSomewhereLive]);
+
   // ── Drawing / AOI ──
   // OsirisMap already owns the draw interaction and the polygon rendering;
   // this only turns a finished ring into a measured, named, coloured record.
@@ -2403,6 +2468,7 @@ export default function Dashboard() {
           terrainRetry={terrainRetry}
           onTerrainStatusChange={setTerrainStatus}
           onLayerOff={key => setActiveLayers(prev => ({ ...prev, [key]: false }))}
+          onDateCompareSwiped={handleMissionCompareSwiped}
           mapStyle={effectiveMapStyle === 'satellite' ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' : 'dark'}
           onCockpitSatelliteFailed={handleRideSatelliteFailed}
           onEntityClick={handleEntityClick} 
@@ -2730,7 +2796,7 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} /></div>}
+      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} /></div>}
 
 
 
@@ -3298,7 +3364,7 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'9px'}}>NUC</div><div className="hud-value text-[10px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} />
+                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} />
                       <div className="mt-8">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       </div>
@@ -3428,6 +3494,7 @@ export default function Dashboard() {
         onClose={() => setActiveCamera(null)}
         onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
         besideOi={showOi && !oiTheater}
+        onLiveVideo={handleMissionLiveVideo}
       />
 
       {/* ── Camera Theater + Ambient TV ──
@@ -3467,7 +3534,7 @@ export default function Dashboard() {
       {showStations && (
         <StationsPanel
           onClose={() => setShowStations(false)}
-          onPlayRadio={(station) => setRadioStation(station)}
+          onPlayRadio={(station) => playRadio(station, 'stations')}
           currentRadioUuid={radioStation?.uuid ?? null}
           onOpenTvWall={(channels, favorites) => { setTvWallSeed({ channels, favorites }); setShowStations(false); setShowTvWall(true); }}
         />
@@ -3486,7 +3553,7 @@ export default function Dashboard() {
       {showTuner && (
         <RadioTuner
           onClose={() => setShowTuner(false)}
-          onPlayRadio={(station) => setRadioStation(station)}
+          onPlayRadio={(station) => playRadio(station, 'tuner')}
           onFlyTo={(lat, lng, zoom, duration) => setFlyToLocation({ lat, lng, zoom, duration, ts: Date.now() })}
           currentRadioUuid={radioStation?.uuid ?? null}
           failureSignal={radioFailure}
@@ -3497,10 +3564,28 @@ export default function Dashboard() {
       {radioStation && (
         <RadioNowPlaying
           station={radioStation}
-          onStop={() => setRadioStation(null)}
+          onStop={() => { radioSourceRef.current = null; setRadioStation(null); }}
           onFailed={(s) => setRadioFailure({ uuid: s.uuid, at: Date.now() })}
+          onPlaying={(s) => setMissionRadioPlaying({ uuid: s.uuid, at: Date.now(), source: radioSourceRef.current })}
         />
       )}
+
+      {/* ── First-run missions card — introduces itself once, on a genuine
+          first visit after the splash; the layer panel's Missions entry
+          reopens it. Chrome, not a modal: the map stays usable under it. */}
+      <MissionsCard
+        active={splashGone}
+        suspended={ridingNow}
+        openSignal={missionsOpenSignal}
+        signals={{
+          cockpitActive: ridingNow,
+          watchedFlightCount: watchedFlights.length,
+          liveVideo: missionLiveVideo,
+          radioPlaying: missionRadioPlaying,
+          dateCompareSwipedAt: missionCompareSwipedAt,
+        }}
+        onAction={handleMissionAction}
+      />
 
       {/* ── Plane Spotting panel ── */}
       {showSpotting && (

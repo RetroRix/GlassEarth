@@ -20,9 +20,13 @@ interface RadioNowPlayingProps {
   /** Fired once per station when its stream proves unplayable (error or
       http-blocked). The Radio Tuner listens to auto-skip dead stops. */
   onFailed?: (station: RadioStation) => void;
+  /** Fired when the audio element actually starts playing — not when a
+   *  station is merely selected. First-run missions listen, with the
+   *  page attributing the playing station to the tuner or the panel. */
+  onPlaying?: (station: RadioStation) => void;
 }
 
-export default function RadioNowPlaying({ station, onStop, onFailed }: RadioNowPlayingProps) {
+export default function RadioNowPlaying({ station, onStop, onFailed, onPlaying }: RadioNowPlayingProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(0.8);
@@ -106,7 +110,7 @@ export default function RadioNowPlaying({ station, onStop, onFailed }: RadioNowP
             src={station.url}
             autoPlay
             preload="none"
-            onPlay={() => setPlaying(true)}
+            onPlay={() => { setPlaying(true); onPlaying?.(station); }}
             onPause={() => setPlaying(false)}
             onError={() => setFailed(true)}
           />
