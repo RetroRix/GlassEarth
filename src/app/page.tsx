@@ -808,6 +808,14 @@ export default function Dashboard() {
        Off until asked for, like the clouds. */
     wind: false,
     rain: false,
+    /* The nowCOAST weather-imagery suite (MRMS radar, GOES IR, lightning
+       density) under one shared history timeline — see lib/weather-imagery
+       and WxImageryBar. Off until asked for, like the other weather layers. */
+    noaa_radar: false,
+    goes_ir: false,
+    lightning: false,
+    /* NHC/CPHC tropical cyclones: forecast cone + track. Off by default. */
+    cyclones: false,
     /* Their time boxes at the bottom left — see WindBar and RainBar. On, so
        turning the layer on brings its controls; off, the layer shows now. */
     wind_controls: true,

@@ -32,6 +32,8 @@ import CctvPreviews, { type PreviewCamera } from '@/components/CctvPreviews';
 import MapControls from '@/components/MapControls';
 import WindBar from '@/components/WindBar';
 import RainBar from '@/components/RainBar';
+import WxImageryBar from '@/components/WxImageryBar';
+import CycloneLayers from '@/components/CycloneLayers';
 import { DOCK } from '@/components/TimeBox';
 import LiveNewsPreviews, { type PreviewFeed } from '@/components/LiveNewsPreviews';
 import { attachTerrain, type TerrainStatus } from '@/lib/map-terrain';
@@ -3782,12 +3784,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       )}
       {selectedSat && <SatelliteCard sat={selectedSat} onClose={clearSat} />}
       {mapReady && !cockpitTarget && <MapControls mapRef={mapRef} onInteract={onFollowInterrupt} />}
-      {mapReady && (activeLayers.wind || activeLayers.rain) && (
+      {mapReady && (activeLayers.wind || activeLayers.rain || activeLayers.noaa_radar || activeLayers.goes_ir || activeLayers.lightning) && (
         <div className={DOCK}>
           {activeLayers.wind && <WindBar mapRef={mapRef} controls={!!activeLayers.wind_controls} particles={!!activeLayers.wind_particles} onOff={() => onLayerOff?.('wind')} />}
           {activeLayers.rain && <RainBar mapRef={mapRef} mapStyle={mapStyle} controls={!!activeLayers.rain_controls} onOff={() => onLayerOff?.('rain')} />}
+          {(activeLayers.noaa_radar || activeLayers.goes_ir || activeLayers.lightning) && (
+            <WxImageryBar mapRef={mapRef} mapStyle={mapStyle}
+              active={{ radar: !!activeLayers.noaa_radar, satellite: !!activeLayers.goes_ir, lightning: !!activeLayers.lightning }}
+              onOff={() => { onLayerOff?.('noaa_radar'); onLayerOff?.('goes_ir'); onLayerOff?.('lightning'); }} />
+          )}
         </div>
       )}
+      {mapReady && activeLayers.cyclones && <CycloneLayers mapRef={mapRef} mapStyle={mapStyle} />}
     </>
   );
 }

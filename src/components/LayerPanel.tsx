@@ -69,6 +69,9 @@ const LAYER_GROUPS: LayerGroupDef[] = [
       { key: 'wind_particles', label: 'Particles', description: 'The classic look · coloured by speed', dataKey: '', parent: 'wind' },
       { key: 'rain', label: 'Rain', description: 'RainViewer radar · every 10 min', dataKey: '' },
       { key: 'rain_controls', label: 'Time Controls', description: 'Last 2 hours · loop', dataKey: '', parent: 'rain' },
+      { key: 'noaa_radar', label: 'NOAA Radar', description: 'nowCOAST MRMS mosaic · CONUS · ~4 min', dataKey: '' },
+      { key: 'goes_ir', label: 'Satellite IR', description: 'NOAA GOES longwave IR · nowCOAST · 5 min', dataKey: '' },
+      { key: 'lightning', label: 'Lightning', description: 'Strike density · NLDN / GLD360 · 15 min', dataKey: '' },
     ],
   },
   {
@@ -130,6 +133,7 @@ const LAYER_GROUPS: LayerGroupDef[] = [
       { key: 'earthquakes', label: 'Earthquakes', dataKey: 'earthquakes' },
       { key: 'fires', label: 'Active Fires', dataKey: 'fires' },
       { key: 'weather', label: 'Severe Weather', dataKey: 'weather_events' },
+      { key: 'cyclones', label: 'Tropical Cyclones', description: 'NHC / CPHC · forecast cone + track', dataKey: '' },
     ],
   },
   {
