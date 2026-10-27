@@ -223,7 +223,10 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
         // The wedge is a flat-map horizon artefact; globe rides keep
         // the sky gradient alone, as shipped.
         let projectionType: string | undefined;
-        try { projectionType = (map as MlMap).getProjection?.()?.type; } catch { projectionType = undefined; }
+        try {
+          const p = (map as MlMap).getProjection?.() as unknown as { type?: string } | undefined;
+          projectionType = p?.type;
+        } catch { projectionType = undefined; }
         if (projectionType === 'globe') { wedgeProbe.branch = 'globe-skip'; return; }
         const rgba = hexToRgba01(colorRef.current);
         if (!rgba) { wedgeProbe.branch = 'bad-color'; return; }
