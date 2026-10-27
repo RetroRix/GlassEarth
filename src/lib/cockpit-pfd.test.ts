@@ -2,14 +2,20 @@ import { describe, it, expect } from 'vitest';
 import {
   ALT_TAPE_PX_PER_FT,
   BAND_DIM_AFTER_MS,
+  EMPTY_PFD_SAMPLE,
   SPEED_TAPE_PX_PER_KT,
   bandDimmed,
+  bankEstimateAvailable,
   cockpitRidePadding,
   deriveVerticalSpeedFpm,
   effectiveRideStyle,
   estimateBankDeg,
+  formatAltBox,
+  formatSpeedBox,
   formatVerticalSpeed,
+  formatVsReadout,
   fullscreenTransition,
+  mergePfdSample,
   RIDE_SKY_DAY,
   RIDE_SKY_NIGHT,
   rideSkySpec,
@@ -19,6 +25,7 @@ import {
   tapeTicks,
   turnRateDegPerSec,
   type BandDimInputs,
+  type PfdSample,
 } from './cockpit-pfd';
 import { COCKPIT_TOP_PADDING_FRACTION } from './cockpit';
 
@@ -189,6 +196,74 @@ describe('cruise dim', () => {
     expect(bandDimmed({ ...base, flightHeld: true })).toBe(false);
     expect(bandDimmed({ ...base, lock: 'free' })).toBe(false);
     expect(bandDimmed({ ...base, hasFlight: false })).toBe(false);
+  });
+});
+
+describe('no-data semantics — null is not zero', () => {
+  // The measured defect (2026-10-26 browser check): SKW5901 ORD→FAR's
+  // feed record carried a position and NO telemetry — its own popup
+  // showed ALT —, SPEED —kt — yet the PFD band read 0 / 0 / 0. Zero is
+  // a real reading on every instrument, so "never reported" (null)
+  // must survive to the glass as null and draw dashes.
+  const silent: PfdSample = { speed: null, altFt: null, heading: null };
+  const cruise: PfdSample = { speed: 444, altFt: 40_000, heading: 211 };
+
+  it('a silent record folded into an empty sample stays all-null', () => {
+    expect(mergePfdSample(EMPTY_PFD_SAMPLE, silent)).toEqual(silent);
+    expect(mergePfdSample(EMPTY_PFD_SAMPLE, EMPTY_PFD_SAMPLE)).toEqual(silent);
+  });
+
+  it('reported values land field by field — partial telemetry included', () => {
+    // A sweep that reports altitude only: speed and heading stay unseen.
+    const altOnly = mergePfdSample(EMPTY_PFD_SAMPLE, { speed: null, altFt: 12_500, heading: null });
+    expect(altOnly).toEqual({ speed: null, altFt: 12_500, heading: null });
+    // A later sweep reporting the rest fills them in without losing alt.
+    const full = mergePfdSample(altOnly, { speed: 210, altFt: null, heading: 95 });
+    expect(full).toEqual({ speed: 210, altFt: 12_500, heading: 95 });
+  });
+
+  it('a reported 0 is data: it lands, and it counts as seen', () => {
+    // Parked on a sea-level field, pointing north: 0 kt / 0 ft / 000°.
+    const zeros: PfdSample = { speed: 0, altFt: 0, heading: 0 };
+    expect(mergePfdSample(EMPTY_PFD_SAMPLE, zeros)).toEqual(zeros);
+    // And a genuine 0 replaces an earlier cruise value — it is a
+    // report, not an absence.
+    expect(mergePfdSample(cruise, zeros)).toEqual(zeros);
+  });
+
+  it('hold-after-seen: a later silent record never drops a seen value', () => {
+    // The feed-gap contract at sample level: once reported, a gap
+    // holds the last value — it does not fall back to null (dashes)
+    // and never to a fabricated 0.
+    expect(mergePfdSample(cruise, silent)).toEqual(cruise);
+    const partial: PfdSample = { speed: null, altFt: 39_500, heading: null };
+    expect(mergePfdSample(cruise, partial)).toEqual({ speed: 444, altFt: 39_500, heading: 211 });
+  });
+
+  it('the value boxes draw dashes only for never-reported fields', () => {
+    expect(formatSpeedBox(null)).toBe('—');
+    expect(formatSpeedBox(0)).toBe('0'); // 0 kt is a reading
+    expect(formatSpeedBox(444.6)).toBe('445');
+    expect(formatAltBox(null)).toBe('—');
+    expect(formatAltBox(0)).toBe('0'); // 0 ft at a sea-level field is a reading
+    expect(formatAltBox(32_800)).toBe('32,800');
+  });
+
+  it('VS is a slope of altitude reports: no altitude ever, no VS', () => {
+    expect(formatVsReadout(0, false)).toBe('VS —');
+    expect(formatVsReadout(1800, false)).toBe('VS —'); // a slope with no reports is fiction
+    expect(formatVsReadout(0, true)).toBe('VS 0');
+    expect(formatVsReadout(2004, true)).toBe('VS +2,000');
+    expect(formatVsReadout(-1234, true)).toBe('VS −1,230');
+  });
+
+  it('a bank estimate needs BOTH speed and heading reported', () => {
+    expect(bankEstimateAvailable(silent)).toBe(false);
+    expect(bankEstimateAvailable({ speed: 250, altFt: null, heading: null })).toBe(false);
+    expect(bankEstimateAvailable({ speed: null, altFt: null, heading: 90 })).toBe(false);
+    expect(bankEstimateAvailable({ speed: 250, altFt: null, heading: 90 })).toBe(true);
+    // Reported zeros are reports: 0 kt pointing north still has an estimate.
+    expect(bankEstimateAvailable({ speed: 0, altFt: 0, heading: 0 })).toBe(true);
   });
 });
 

@@ -14,13 +14,14 @@ export interface WatchedFlight {
   category?: string;
 }
 
-/** Live telemetry, refreshed from the flights feed. */
+/** Live telemetry, refreshed from the flights feed. A field the feed
+ *  never reported is null — "no data", never a false 0. */
 export interface FlightTelemetry {
   lat: number;
   lng: number;
-  alt: number;
-  speed_knots: number;
-  heading: number;
+  alt: number | null;
+  speed_knots: number | null;
+  heading: number | null;
   grounded?: boolean;
   squawk?: string;
 }
@@ -164,7 +165,7 @@ export function toFeet(metres: number): number {
   return Math.round((metres * 3.28084) / 25) * 25;
 }
 
-export function formatAlt(metres: number | undefined, grounded?: boolean): string {
+export function formatAlt(metres: number | null | undefined, grounded?: boolean): string {
   if (grounded) return 'Ground';
   if (typeof metres !== 'number' || !Number.isFinite(metres)) return '—';
   return `${toFeet(metres).toLocaleString()} ft`;
@@ -276,7 +277,7 @@ function Row({ flight, telem, onRemove, onLocate, onDetail, onRide }: {
           <div className="flex items-center gap-1">
             <Gauge className="w-2.5 h-2.5 text-[var(--text-muted)] flex-shrink-0" />
             <span className="text-[10px] text-[var(--text-secondary)] tabular-nums truncate">
-              {telem ? `${Math.round(telem.speed_knots)} kt` : '—'}
+              {telem && telem.speed_knots !== null ? `${Math.round(telem.speed_knots)} kt` : '—'}
             </span>
           </div>
           <div className="flex items-center gap-1">

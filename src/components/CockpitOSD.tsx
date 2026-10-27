@@ -49,9 +49,12 @@ export interface CockpitFlightRecord {
   model?: string;
   lat: number;
   lng: number;
-  alt: number;
+  /** Metres, or null when the feed never reported an altitude for this
+   *  record — null is "no data", never a 0 m reading. Same contract for
+   *  heading: null, never a fake 000°. Speed has always been nullable. */
+  alt: number | null;
   speed_knots: number | null;
-  heading: number;
+  heading: number | null;
   grounded?: boolean;
   squawk?: string;
 }
@@ -209,7 +212,9 @@ export default function CockpitOSD({
   }, [flight, flights, target.icao24]);
 
   const callsign = (flight?.callsign || target.callsign || target.icao24.toUpperCase()).trim();
-  const headingDeg = flight ? Math.round(((flight.heading || 0) % 360 + 360) % 360) : null;
+  const headingDeg = flight && typeof flight.heading === 'number'
+    ? Math.round(((flight.heading % 360) + 360) % 360)
+    : null;
   const routeText = rideRouteText(detail);
 
   const hop = (c: ContactFlight) => {

@@ -182,9 +182,18 @@ function classifyFlight(f: any) {
 
   const callsign = flightStr || f.hex || 'UNKNOWN';
   const altRaw = f.alt_baro;
-  const altMeters = typeof altRaw === 'number' ? altRaw * 0.3048 : 0;
+  /* Absence is information, not zero. A record with no barometric
+     altitude (an OpenSky state without one, a position-only report)
+     has NO altitude: null, not 0 m. Zero is a real reading — an
+     aircraft on the ground at a sea-level field — and collapsing
+     "never reported" into it made downstream instruments (the
+     cockpit PFD) draw a false 0 for flights like SKW5901 whose own
+     popup correctly showed ALT —. Same rule for track: an unreported
+     heading is null, never a fake 000° north. Ground speed has
+     always kept this contract (null when gs is absent). */
+  const altMeters = typeof altRaw === 'number' ? altRaw * 0.3048 : null;
   const speedKnots = typeof f.gs === 'number' ? Math.round(f.gs * 10) / 10 : null;
-  const heading = f.track || 0;
+  const heading = typeof f.track === 'number' ? f.track : null;
   const isHeli = HELI_TYPES.has(modelUpper) || f.category_os === 8;
   const isGrounded = typeof altRaw === 'number' && altRaw < 100;
 
@@ -205,7 +214,7 @@ function classifyFlight(f: any) {
   // airline-designator test is what carries the split for the bulk of the map.
   const isGaCallsign = !airlineCode && CALLSIGN_RE.test(flightStr);
   const cruisesLikeAJet =
-    altMeters > JET_CRUISE_ALT_M && (speedKnots ?? 0) > JET_CRUISE_KTS;
+    (altMeters ?? 0) > JET_CRUISE_ALT_M && (speedKnots ?? 0) > JET_CRUISE_KTS;
 
   let category: 'commercial' | 'private' | 'jet' | 'military' = 'commercial';
   if (isOsMilitary || dbFlags & 1 || MILITARY_INDICATORS.has(modelUpper) || (f.flight || '').match(/^(RCH|KING|DUKE|EVAC|JAKE|REACH|CONVOY)\d/i)) {
@@ -227,8 +236,8 @@ function classifyFlight(f: any) {
     callsign,
     lat: Math.round(lat * 100000) / 100000,
     lng: Math.round(lon * 100000) / 100000,
-    alt: Math.round(altMeters),
-    heading: Math.round(heading),
+    alt: altMeters === null ? null : Math.round(altMeters),
+    heading: heading === null ? null : Math.round(heading),
     speed_knots: speedKnots,
     model: f.t || 'Unknown',
     icao24: f.hex || '',

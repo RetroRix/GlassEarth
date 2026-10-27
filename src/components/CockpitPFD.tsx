@@ -8,17 +8,23 @@ import {
   ALT_TAPE_PX_PER_FT,
   ALT_TAPE_TICK_FT,
   BAND_DIM_OPACITY,
+  EMPTY_PFD_SAMPLE,
   SPEED_TAPE_LABEL_KT,
   SPEED_TAPE_PX_PER_KT,
   SPEED_TAPE_TICK_KT,
   bandDimmed,
+  bankEstimateAvailable,
   deriveVerticalSpeedFpm,
   estimateBankDeg,
-  formatVerticalSpeed,
+  formatAltBox,
+  formatSpeedBox,
+  formatVsReadout,
+  mergePfdSample,
   tapeAnchorFor,
   tapeStripOffsetPx,
   tapeTicks,
   turnRateDegPerSec,
+  type PfdSample,
 } from '@/lib/cockpit-pfd';
 import { toFeet } from './FlightWatchPanel';
 import type { CockpitFlightRecord } from './CockpitOSD';
@@ -50,7 +56,9 @@ import type { CockpitFlightRecord } from './CockpitOSD';
    text straight to the DOM — the tapes glide between the feed's
    30 s reports instead of jumping, and React never re-renders per
    frame. Through a feed gap the targets stop moving and the glass
-   simply holds its last readings.
+   simply holds its last readings. A field the feed has never
+   reported on this ride draws dashes, never 0 — zero is a reading
+   (0 kt, 0 ft, 000°), not an absence.
    ═══════════════════════════════════════════════════════════════ */
 
 interface CockpitPFDProps {
@@ -91,7 +99,7 @@ const chase = (current: number, target: number, dtMs: number, tauMs: number) =>
 
 export default function CockpitPFD({ flight, flightHeld = false, lock, targetIcao }: CockpitPFDProps) {
   const initSpeed = flight && typeof flight.speed_knots === 'number' ? flight.speed_knots : null;
-  const initAltFt = flight ? toFeet(flight.alt) : null;
+  const initAltFt = flight && typeof flight.alt === 'number' ? toFeet(flight.alt) : null;
   const initHeading = flight ? flight.heading : null;
 
   /* Tape anchors step at feed cadence; the strips animate between them.
@@ -113,6 +121,30 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
   const anchorSpeed = anchors.speed;
   const anchorAlt = anchors.alt;
 
+  /* The ride's sample: what each instrument has EVER been told on this
+     ride. Records report per-field — a position-only sweep carries no
+     altitude, no speed, no track — so each record folds into the
+     sample (lib mergePfdSample): a reported field updates it (a
+     reported 0 included), an unreported one holds its last value, and
+     a never-reported one stays null, which is what draws dashes
+     instead of a false 0. A hop starts over from the new target's own
+     first record. Same render-adjust pattern as the anchors above. */
+  const recordSample: PfdSample = { speed: initSpeed, altFt: initAltFt, heading: initHeading };
+  const [heldSample, setHeldSample] = useState<PfdSample>(recordSample);
+  const [heldSrc, setHeldSrc] = useState<{ target: string; sample: PfdSample }>({
+    target: targetIcao, sample: recordSample,
+  });
+  if (
+    heldSrc.target !== targetIcao
+    || heldSrc.sample.speed !== recordSample.speed
+    || heldSrc.sample.altFt !== recordSample.altFt
+    || heldSrc.sample.heading !== recordSample.heading
+  ) {
+    const base = heldSrc.target === targetIcao ? heldSample : EMPTY_PFD_SAMPLE;
+    setHeldSrc({ target: targetIcao, sample: recordSample });
+    setHeldSample(mergePfdSample(base, recordSample));
+  };
+
   const speedTicks = useMemo(
     () => tapeTicks(anchorSpeed, SPEED_TAPE_TICK_KT, SPEED_TAPE_LABEL_KT, SPEED_TAPE_PX_PER_KT),
     [anchorSpeed],
@@ -122,14 +154,18 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
     [anchorAlt],
   );
 
-  /* The smoothed display state + the machinery that chases it. */
+  /* The smoothed display state + the machinery that chases it. The
+     chase targets ARE the held sample: once a field has been seen it
+     never goes null again mid-ride, so a quiet record cannot pull a
+     held reading back to dashes. */
   const dispRef = useRef<DisplayState>({
-    speed: initSpeed, altFt: initAltFt, heading: initHeading, turnRate: 0, bank: 0, vs: 0,
+    speed: heldSample.speed, altFt: heldSample.altFt, heading: heldSample.heading,
+    turnRate: 0, bank: 0, vs: 0,
   });
-  const tgtRef = useRef({ speed: initSpeed, altFt: initAltFt, heading: initHeading });
+  const tgtRef = useRef<PfdSample>({ ...heldSample });
   const anchorRef = useRef({ speed: anchorSpeed, alt: anchorAlt });
   useEffect(() => {
-    tgtRef.current = { speed: initSpeed, altFt: initAltFt, heading: initHeading };
+    tgtRef.current = { speed: heldSample.speed, altFt: heldSample.altFt, heading: heldSample.heading };
     anchorRef.current = { speed: anchorSpeed, alt: anchorAlt };
   });
   const sampleRef = useRef<{ heading: number; atMs: number } | null>(null);
@@ -145,9 +181,11 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
     turnTargetRef.current = 0;
   }, [targetIcao]);
 
-  /* Each new report re-aims the turn-rate estimate. */
+  /* Each new report re-aims the turn-rate estimate. A record without
+     a heading carries no turn information — it neither re-aims the
+     estimate nor poisons the sample clock. */
   useEffect(() => {
-    if (!flight) return;
+    if (!flight || typeof flight.heading !== 'number') return;
     const now = performance.now();
     const prev = sampleRef.current;
     if (prev) {
@@ -188,7 +226,10 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
       const sample = sampleRef.current;
       const turnGoal = sample && now - sample.atMs > 60_000 ? 0 : turnTargetRef.current;
       d.turnRate = chase(d.turnRate, turnGoal, dt, 1600);
-      const bankGoal = estimateBankDeg(d.turnRate, d.speed ?? 0);
+      /* No bank estimate exists until speed AND heading have both
+         been reported this ride — the goal is then neutral, never a
+         fabricated level-flight reading drawn from nothing. */
+      const bankGoal = bankEstimateAvailable(t) ? estimateBankDeg(d.turnRate, d.speed ?? 0) : 0;
       d.bank = chase(d.bank, bankGoal, dt, 1300);
       /* Vertical speed is the slope of the displayed altitude itself —
          arithmetic on the same reports, smoothed like everything else. */
@@ -209,11 +250,13 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
           `translateY(${tapeStripOffsetPx(d.altFt, anchorRef.current.alt, ALT_TAPE_PX_PER_FT).toFixed(2)}px)`;
       }
       const w = writtenRef.current;
-      const speedText = d.speed === null ? '—' : `${Math.round(d.speed)}`;
+      const speedText = formatSpeedBox(d.speed);
       if (speedBoxRef.current && w.speed !== speedText) { w.speed = speedText; speedBoxRef.current.textContent = speedText; }
-      const altText = d.altFt === null ? '—' : `${Math.round(d.altFt).toLocaleString('en-US')}`;
+      const altText = formatAltBox(d.altFt);
       if (altBoxRef.current && w.alt !== altText) { w.alt = altText; altBoxRef.current.textContent = altText; }
-      const vsText = formatVerticalSpeed(d.vs);
+      /* The VS slope exists only once altitude has been seen this
+         ride (the held target says so); before that, "VS —". */
+      const vsText = formatVsReadout(d.vs, t.altFt !== null);
       if (vsRef.current && w.vs !== vsText) { w.vs = vsText; vsRef.current.textContent = vsText; }
       const hdgText = d.heading === null ? '—' : `${Math.round(((d.heading % 360) + 360) % 360)}° ${cardinalFor(d.heading)}`;
       if (hdgBoxRef.current && w.hdg !== hdgText) { w.hdg = hdgText; hdgBoxRef.current.textContent = hdgText; }
@@ -245,8 +288,11 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
     return () => { window.removeEventListener('pointerdown', onPointer); clearInterval(iv); };
   }, [lock, flightHeld, flight]);
 
-  const hasSpeed = initSpeed !== null;
-  const hasAlt = initAltFt !== null;
+  /* A tape exists once its field has been reported on this ride — and
+     never un-exists mid-ride when a later record goes quiet on it. */
+  const hasSpeed = heldSample.speed !== null;
+  const hasAlt = heldSample.altFt !== null;
+  const bankAvailable = bankEstimateAvailable(heldSample);
 
   return (
     <div
@@ -284,7 +330,7 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
           )}
           <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 flex justify-center pointer-events-none">
             <span ref={speedBoxRef} style={{ ...BOX, fontSize: 14, padding: '1px 7px' }} className="tabular-nums">
-              {hasSpeed ? Math.round(initSpeed) : '—'}
+              {formatSpeedBox(heldSample.speed)}
             </span>
           </div>
         </div>
@@ -346,15 +392,20 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
               <div style={{ position: 'absolute', right: 0, top: 4, width: 4, height: 7, background: '#FFB454' }} />
             </div>
           </div>
-          <div className="absolute left-0 right-0 text-center" style={{
-            bottom: 7, fontSize: 7, letterSpacing: '0.18em', color: 'rgba(255,255,255,0.75)',
-          }}>
-            BANK EST
-          </div>
+          {/* The estimate's label exists only when an estimate does:
+              with no speed/heading ever reported there is nothing to
+              label, and the ball just sits neutral. */}
+          {bankAvailable && (
+            <div className="absolute left-0 right-0 text-center" style={{
+              bottom: 7, fontSize: 7, letterSpacing: '0.18em', color: 'rgba(255,255,255,0.75)',
+            }}>
+              BANK EST
+            </div>
+          )}
         </div>
         <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ bottom: 0 }}>
           <span ref={hdgBoxRef} style={{ ...BOX, fontSize: 12, padding: '1px 8px' }} className="tabular-nums whitespace-nowrap">
-            {initHeading === null ? '—' : `${Math.round(((initHeading % 360) + 360) % 360)}° ${cardinalFor(initHeading)}`}
+            {heldSample.heading === null ? '—' : `${Math.round(((heldSample.heading % 360) + 360) % 360)}° ${cardinalFor(heldSample.heading)}`}
           </span>
         </div>
       </div>
@@ -384,14 +435,14 @@ export default function CockpitPFD({ flight, flightHeld = false, lock, targetIca
           )}
           <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 flex justify-center pointer-events-none">
             <span ref={altBoxRef} style={{ ...BOX, fontSize: 12, padding: '1px 6px' }} className="tabular-nums">
-              {hasAlt ? Math.round(initAltFt).toLocaleString('en-US') : '—'}
+              {formatAltBox(heldSample.altFt)}
             </span>
           </div>
         </div>
         <div ref={vsRef} className="text-center tabular-nums" style={{
           color: 'rgba(232,230,224,0.75)', fontSize: 9, letterSpacing: '0.08em', marginTop: 2,
         }}>
-          VS 0
+          {formatVsReadout(0, hasAlt)}
         </div>
       </div>
     </div>

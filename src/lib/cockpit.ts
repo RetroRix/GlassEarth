@@ -293,9 +293,10 @@ export interface ContactFlight {
   callsign?: string;
   lat: number;
   lng: number;
-  alt?: number;
+  /** Null when the feed never reported it — "no data", not 0. */
+  alt?: number | null;
   speed_knots?: number | null;
-  heading?: number;
+  heading?: number | null;
   model?: string;
   grounded?: boolean;
 }

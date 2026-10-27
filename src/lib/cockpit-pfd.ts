@@ -143,6 +143,75 @@ export function formatVerticalSpeed(fpm: number): string {
   return `VS ${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toLocaleString()}`;
 }
 
+/* ── No-data semantics ──────────────────────────────────────────────────
+ *
+ * A feed record can carry a position and nothing else — no altitude, no
+ * ground speed, no track (SKW5901 ORD→FAR is the measured case: its own
+ * popup showed ALT —, SPEED —kt). Zero is a REAL reading on every one
+ * of these instruments (0 kt parked, 0 ft at a sea-level field, 000°
+ * north), so "never reported" must never be drawn as 0. The feed marks
+ * it null; this sample is how the band carries that distinction.
+ */
+
+/** The band's three feed fields, each null until the feed reports it. */
+export interface PfdSample {
+  speed: number | null;
+  altFt: number | null;
+  heading: number | null;
+}
+
+/** A ride that has heard nothing yet. */
+export const EMPTY_PFD_SAMPLE: PfdSample = { speed: null, altFt: null, heading: null };
+
+/**
+ * Fold the newest record into the ride's sample, field by field: a
+ * field the record reports — INCLUDING a genuine 0 — becomes the
+ * sample's value; a field it doesn't report keeps the last value seen
+ * this ride. That one rule is both halves of the honesty contract:
+ * never-reported stays null (the glass draws dashes), and once a value
+ * HAS arrived, a later gap holds it instead of dropping back to
+ * dashes or zero.
+ */
+export function mergePfdSample(prev: PfdSample, next: PfdSample): PfdSample {
+  return {
+    speed: next.speed ?? prev.speed,
+    altFt: next.altFt ?? prev.altFt,
+    heading: next.heading ?? prev.heading,
+  };
+}
+
+/** The speed box: dashes until speed has been reported, then the value
+ *  — a reported 0 reads "0", because 0 kt is a reading, not an absence. */
+export function formatSpeedBox(speed: number | null): string {
+  return speed === null ? '—' : `${Math.round(speed)}`;
+}
+
+/** The altitude box: dashes until altitude has been reported. */
+export function formatAltBox(altFt: number | null): string {
+  return altFt === null ? '—' : `${Math.round(altFt).toLocaleString('en-US')}`;
+}
+
+/**
+ * The VS readout: VS is a slope OF altitude reports, so while no
+ * altitude has ever arrived this ride there is nothing to slope —
+ * "VS —", not a fake calm "VS 0". Once altitude exists, the slope
+ * formats as usual.
+ */
+export function formatVsReadout(vsFpm: number, altSeen: boolean): string {
+  return altSeen ? formatVerticalSpeed(vsFpm) : 'VS —';
+}
+
+/**
+ * Whether a bank estimate exists at all: it is computed from turn rate
+ * (which needs heading samples) and ground speed, so until BOTH have
+ * been reported there is no estimate — the ball sits neutral and the
+ * BANK EST readout stays off, rather than implying level flight from
+ * nothing. Reported zeros count: 0 kt on a 000° heading is data.
+ */
+export function bankEstimateAvailable(sample: PfdSample): boolean {
+  return sample.speed !== null && sample.heading !== null;
+}
+
 /* ── Framing ──────────────────────────────────────────────────────────── */
 
 /**

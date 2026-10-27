@@ -40,11 +40,40 @@ describe('CockpitPFD — the glass band', () => {
     expect(html).toContain('>32,500<'); // a labelled altitude tick near 32 800
   });
 
-  it('before the first report the boxes dash and the band still stands', () => {
+  it('before the first report the boxes dash, the band stands, and no bank label is claimed', () => {
     const html = render({ flight: null });
     expect(html).toContain('data-cockpit-band');
-    expect(html).toContain('BANK EST');
+    // No speed or heading has ever been reported, so there is no bank
+    // estimate to label — the ball sits neutral with no BANK EST claim.
+    expect(html).not.toContain('BANK EST');
     expect(html).not.toContain('>450<');
+  });
+
+  it('a record with NO telemetry at all dashes everything — never 0 / 0 / 0', () => {
+    // The SKW5901 defect (2026-10-26): a position-only record whose
+    // own popup showed ALT —, SPEED —kt, while the band read 0/0/0.
+    const html = render({ flight: { ...flight, alt: null, speed_knots: null, heading: null } });
+    expect(html).toContain('data-cockpit-band');
+    expect(html).not.toContain('>0<'); // no box, no tick claims a fake zero
+    expect(html).not.toContain('0° N'); // no fake north heading
+    expect(html).not.toContain('BANK EST'); // no estimate from nothing
+    expect(html).toContain('VS —'); // no altitude reports, no slope
+  });
+
+  it('a record reporting genuine zeros reads 0 / 0 / 000° — zero is a reading', () => {
+    // Parked at a sea-level field, pointing north: the feed SAID 0.
+    const html = render({ flight: { ...flight, alt: 0, speed_knots: 0, heading: 0 } });
+    expect(html).toContain('>0<');
+    expect(html).toContain('0° N');
+    expect(html).toContain('BANK EST'); // speed + heading reported: an estimate exists
+    expect(html).toContain('VS 0'); // altitude reported: the slope readout exists
+  });
+
+  it('a record without an altitude dashes the altitude side only', () => {
+    const html = render({ flight: { ...flight, alt: null } });
+    expect(html).toContain('>450<'); // speed still reads
+    expect(html).not.toContain('>32,800<');
+    expect(html).toContain('VS —'); // VS slopes altitude reports; there are none
   });
 
   it('a record without a speed dashes only the speed box', () => {
