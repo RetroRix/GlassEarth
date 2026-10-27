@@ -262,25 +262,6 @@ export function rideSkySpec(riding: boolean, theme: string): RideSkySpec | null 
   return theme === 'day' ? RIDE_SKY_DAY : RIDE_SKY_NIGHT;
 }
 
-/**
- * The style layers a ride recolours with the sky: the background
- * layers. At the ride's pitch there is a wedge between the ground
- * plane's far edge and the true horizon where NEITHER the tiles nor
- * the sky gradient reach — and what paints it is the style's
- * background layer, in the basemap's flat colour (Positron's
- * near-white, Dark Matter's near-black). That wedge was the second
- * half of the "white/grey bar": the sky alone could not fix it.
- * While a ride is on, the background layers wear the sky's horizon
- * colour — the same colour the fog melts the ground into — so the
- * wedge becomes the haze band itself: gradient lands on it from
- * above, fogged ground rises out of it below, and the eye reads one
- * continuous horizon. Captured paint is restored verbatim on exit.
- */
-export function rideBackgroundLayerIds(
-  layers: readonly { id: string; type: string }[],
-): string[] {
-  return layers.filter((l) => l.type === 'background').map((l) => l.id);
-}
 
 /** The ArcGIS World_Imagery tile URL the satellite layer serves — also
  *  what the ride probes to learn whether the imagery is reachable. */

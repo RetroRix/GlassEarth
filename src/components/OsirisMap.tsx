@@ -21,8 +21,9 @@ import {
 import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import {
   PFD_BAND_HEIGHT_DESKTOP_PX, PFD_BAND_HEIGHT_MOBILE_PX,
-  cockpitRidePadding, rideBackgroundLayerIds, rideSkySpec, satelliteTileUrl,
+  cockpitRidePadding, rideSkySpec, satelliteTileUrl,
 } from '@/lib/cockpit-pfd';
+import { RIDE_WEDGE_LAYER_ID, createRideWedgeLayer } from '@/lib/ride-wedge-layer';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -3083,12 +3084,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
      map already had is captured on the way in and put back verbatim
      on the way out — the globe's space sky included; setSky with no
      sky removes one the map never had. Keyed to the theme, not the
-     basemap, so a satellite-failure fallback keeps the same sky. */
-  const rideSkyRestoreRef = useRef<{
-    captured: boolean;
-    sky: ReturnType<maplibregl.Map['getSky']> | undefined;
-    backgrounds: { id: string; color: unknown }[];
-  }>({ captured: false, sky: undefined, backgrounds: [] });
+     basemap, so a satellite-failure fallback keeps the same sky.
+     The band BELOW the horizon line, past the far edge of the tiles,
+     is beyond the sky program's reach (it writes only above the
+     line, and the background layer paints only under tiles) — a
+     custom wedge layer (lib/ride-wedge-layer) fills it from inside
+     the canvas with the same horizon colour, on the same
+     enter/exit lifecycle. */
+  const rideSkyRestoreRef = useRef<{ captured: boolean; sky: ReturnType<maplibregl.Map['getSky']> | undefined }>({
+    captured: false, sky: undefined,
+  });
+  /* The wedge below the horizon (lib/ride-wedge-layer): a custom
+     canvas layer wearing the sky's horizon colour, added for the
+     ride and removed after it. Its colour lives in a ref the layer
+     reads per frame, so a theme flip mid-ride recolours it. */
+  const rideWedgeColorRef = useRef<string>('#cfe2f2');
+  const rideWedgeLayerRef = useRef<ReturnType<typeof createRideWedgeLayer> | null>(null);
+  const rideWedgeAddedRef = useRef(false);
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
@@ -3098,44 +3110,32 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         if (!rideSkyRestoreRef.current.captured) {
           let previous: ReturnType<maplibregl.Map['getSky']> | undefined;
           try { previous = map.getSky(); } catch { previous = undefined; }
-          /* The wedge between the ground's far edge and the horizon is
-             not the sky's to paint — the style's background layer shows
-             there in its flat basemap colour — so the background layers
-             are captured too and recoloured to the sky's horizon colour
-             for the ride (lib/cockpit-pfd: rideBackgroundLayerIds). */
-          const backgrounds: { id: string; color: unknown }[] = [];
-          try {
-            for (const id of rideBackgroundLayerIds(map.getStyle()?.layers ?? [])) {
-              backgrounds.push({ id, color: map.getPaintProperty(id, 'background-color') });
-            }
-          } catch { /* style not settled — the sky still applies */ }
-          rideSkyRestoreRef.current = { captured: true, sky: previous, backgrounds };
+          rideSkyRestoreRef.current = { captured: true, sky: previous };
         }
         map.setSky(spec);
-        for (const bg of rideSkyRestoreRef.current.backgrounds) {
-          try { map.setPaintProperty(bg.id, 'background-color', spec['horizon-color']); } catch { /* layer gone */ }
+        rideWedgeColorRef.current = spec['horizon-color'];
+        if (!rideWedgeAddedRef.current && !map.getLayer(RIDE_WEDGE_LAYER_ID)) {
+          if (!rideWedgeLayerRef.current) {
+            rideWedgeLayerRef.current = createRideWedgeLayer(rideWedgeColorRef);
+          }
+          const firstLayerId = map.getStyle()?.layers?.[0]?.id;
+          if (firstLayerId) map.addLayer(rideWedgeLayerRef.current, firstLayerId);
+          else map.addLayer(rideWedgeLayerRef.current);
+          rideWedgeAddedRef.current = true;
         }
-        /* TEMP DIAGNOSTIC (sky wedge probe — remove before final): */
-        try {
-          const w = window as unknown as { __skyRideProbe?: unknown };
-          w.__skyRideProbe = {
-            ids: rideSkyRestoreRef.current.backgrounds.map((b) => b.id),
-            before: rideSkyRestoreRef.current.backgrounds.map((b) => String(b.color)),
-            after: rideSkyRestoreRef.current.backgrounds.map((b) => String(map.getPaintProperty(b.id, 'background-color'))),
-            skySpec: map.getSky(),
-            styleLayers: (map.getStyle()?.layers ?? []).slice(0, 3).map((l) => `${l.id}:${l.type}`),
-          };
-        } catch { /* probe only */ }
+        map.triggerRepaint();
       } else if (rideSkyRestoreRef.current.captured) {
-        const { sky: previous, backgrounds } = rideSkyRestoreRef.current;
-        rideSkyRestoreRef.current = { captured: false, sky: undefined, backgrounds: [] };
+        const previous = rideSkyRestoreRef.current.sky;
+        rideSkyRestoreRef.current = { captured: false, sky: undefined };
         /* A captured "no sky" restores by passing none — MapLibre's
            runtime removes the sky for a missing spec, though its
            public typing only admits a spec object; hence the cast. */
         map.setSky(previous as maplibregl.SkySpecification);
-        for (const bg of backgrounds) {
-          try { map.setPaintProperty(bg.id, 'background-color', bg.color as never); } catch { /* layer gone */ }
+        if (rideWedgeAddedRef.current) {
+          rideWedgeAddedRef.current = false;
+          if (map.getLayer(RIDE_WEDGE_LAYER_ID)) map.removeLayer(RIDE_WEDGE_LAYER_ID);
         }
+        map.triggerRepaint();
       }
     } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
   }, [mapReady, cockpitTarget, theme, projection]);
