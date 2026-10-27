@@ -25,6 +25,10 @@ import {
 } from '@/lib/cockpit-pfd';
 import { RIDE_WEDGE_LAYER_ID, createRideWedgeLayer } from '@/lib/ride-wedge-layer';
 import {
+  SATELLITE_REFERENCE_ANCHOR, SATELLITE_REFERENCE_LAYERS,
+  SATELLITE_REFERENCE_MAX_ZOOM, SATELLITE_REFERENCE_TILE_SIZE,
+} from '@/lib/satellite-reference';
+import {
   buildRoutePath, sampleRoute, flownCoords, routeFlightDurationMs, routeFlightZoom,
   turnToward, ROUTE_FLIGHT_PITCH, ROUTE_FLIGHT_TURN_DEG_PER_SEC,
 } from '@/lib/route-flight';
@@ -2791,9 +2795,43 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         } else {
           map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
         }
+        /* Hybrid satellite (Rick, 2026-10-27): the imagery alone names
+           nothing, so Esri's reference services — built to sit over
+           World_Imagery — draw the borders, city and place names and
+           roads over it, in the same slot (below every app layer, so
+           markers and popups stay on top) and in insertion order, names
+           topmost. Each overlay is guarded on its own: a reference
+           failure degrades the satellite view to bare imagery, never
+           to a broken map. The ride derives this same style, so rides
+           get the labelled imagery too. */
+        for (const spec of SATELLITE_REFERENCE_LAYERS) {
+          try {
+            if (!map.getSource(spec.sourceId)) {
+              map.addSource(spec.sourceId, {
+                type: 'raster',
+                tiles: [...spec.tiles],
+                tileSize: SATELLITE_REFERENCE_TILE_SIZE,
+                maxzoom: SATELLITE_REFERENCE_MAX_ZOOM,
+                attribution: spec.attribution,
+              });
+            }
+            if (!map.getLayer(spec.layerId)) {
+              map.addLayer({ id: spec.layerId, type: 'raster', source: spec.sourceId }, SATELLITE_REFERENCE_ANCHOR);
+            } else {
+              map.setLayoutProperty(spec.layerId, 'visibility', 'visible');
+            }
+          } catch (e) {
+            console.warn('Satellite reference layer failed:', e);
+          }
+        }
       } else {
         if (map.getLayer('satellite-layer')) {
           map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+        }
+        for (const spec of SATELLITE_REFERENCE_LAYERS) {
+          if (map.getLayer(spec.layerId)) {
+            map.setLayoutProperty(spec.layerId, 'visibility', 'none');
+          }
         }
       }
     } catch (e) {
