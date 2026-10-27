@@ -94,6 +94,9 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
   const dividerRef = useRef<HTMLDivElement | null>(null);
   const chipARef = useRef<HTMLDivElement | null>(null);
   const chipBRef = useRef<HTMLDivElement | null>(null);
+  /** Last tile template handed to each source — setTiles only on change. */
+  const lastTilesA = useRef('');
+  const lastTilesB = useRef('');
 
   useEffect(() => {
     try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch { /* storage blocked */ }
@@ -187,15 +190,18 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     const r = sideB?.resolved;
     if (!overlay) return;
     const apply = () => {
+      const tiles = r ? gibsTiles(r.sensor, r.actual) : gibsTiles('s30', '2000-01-01');
       if (!overlay.getSource(B_SRC)) {
         overlay.addSource(B_SRC, {
           type: 'raster', tileSize: 256, maxzoom: 12,
           attribution: r ? DC_SENSORS[r.sensor].attribution : DC_SENSORS.s30.attribution,
-          tiles: r ? gibsTiles(r.sensor, r.actual) : gibsTiles('s30', '2000-01-01'),
+          tiles,
         });
+        lastTilesB.current = tiles[0];
         overlay.addLayer({ id: 'dc-b', type: 'raster', source: B_SRC, paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 } });
-      } else if (r) {
-        (overlay.getSource(B_SRC) as RasterTileSource).setTiles(gibsTiles(r.sensor, r.actual));
+      } else if (r && tiles[0] !== lastTilesB.current) {
+        lastTilesB.current = tiles[0];
+        (overlay.getSource(B_SRC) as RasterTileSource).setTiles(tiles);
       }
       overlay.setLayoutProperty('dc-b', 'visibility', r ? 'visible' : 'none');
       if (r) overlay.setPaintProperty('dc-b', 'raster-opacity', settings.opacity);
@@ -211,14 +217,17 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     void styleTick;
     const r = sideA?.resolved;
     const before = beneath(map);
+    const tiles = r ? gibsTiles(r.sensor, r.actual) : gibsTiles('s30', '2000-01-01');
     if (!map.getSource(A_SRC)) {
       map.addSource(A_SRC, {
         type: 'raster', tileSize: 256, maxzoom: 12,
         attribution: r ? DC_SENSORS[r.sensor].attribution : DC_SENSORS.s30.attribution,
-        tiles: r ? gibsTiles(r.sensor, r.actual) : gibsTiles('s30', '2000-01-01'),
+        tiles,
       });
-    } else if (r) {
-      (map.getSource(A_SRC) as RasterTileSource).setTiles(gibsTiles(r.sensor, r.actual));
+      lastTilesA.current = tiles[0];
+    } else if (r && tiles[0] !== lastTilesA.current) {
+      lastTilesA.current = tiles[0];
+      (map.getSource(A_SRC) as RasterTileSource).setTiles(tiles);
     }
     if (!map.getLayer('dc-back')) {
       map.addLayer({ id: 'dc-back', type: 'background', paint: { 'background-color': BACK, 'background-opacity': 0.92 } }, before);
@@ -226,8 +235,21 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     if (!map.getLayer('dc-a')) {
       map.addLayer({ id: 'dc-a', type: 'raster', source: A_SRC, paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 } }, before);
     } else {
-      map.moveLayer('dc-back', before);
-      map.moveLayer('dc-a', before);
+      // Keep [back, a] stacked under the labels — but ONLY move a layer
+      // that is actually out of place. An unconditional moveLayer here
+      // ping-pongs the two layers' order, each move fires styledata,
+      // styledata re-runs this effect, and the page churns forever
+      // (found in the live browser check: the app froze on load with
+      // compare in the layers link). Idempotent or nothing.
+      const ids = map.getStyle().layers.map(l => l.id);
+      const ia = ids.indexOf('dc-a');
+      const ib = ids.indexOf('dc-back');
+      const iBefore = before ? ids.indexOf(before) : ids.length;
+      const ordered = ib >= 0 && ia === ib + 1 && ia < iBefore;
+      if (!ordered) {
+        map.moveLayer('dc-a', before);
+        map.moveLayer('dc-back', 'dc-a');
+      }
     }
     map.setLayoutProperty('dc-a', 'visibility', r ? 'visible' : 'none');
     map.setLayoutProperty('dc-back', 'visibility', r ? 'visible' : 'none');
