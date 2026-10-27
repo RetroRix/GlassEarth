@@ -157,11 +157,6 @@ function compile(gl: WebGLRenderingContext | WebGL2RenderingContext, type: numbe
  * Any GL failure leaves the layer inert — it must never break the
  * map it decorates.
  */
-/* TEMP DIAGNOSTIC (wedge probe v2 — remove before final): */
-export const wedgeProbe = {
-  adds: 0, renders: 0, branch: 'never-rendered', effect: 'never-ran', err: '',
-};
-
 export function createRideWedgeLayer(colorRef: { current: string }): CustomLayerInterface {
   let map: MlMap | null = null;
   let program: WebGLProgram | null = null;
@@ -177,7 +172,6 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
     renderingMode: '2d',
 
     onAdd(m: MlMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
-      wedgeProbe.adds++;
       map = m;
       try {
         const vs = compile(gl, gl.VERTEX_SHADER, WEDGE_VERT);
@@ -217,8 +211,7 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
     },
 
     render(gl: WebGLRenderingContext | WebGL2RenderingContext, options?: { fov?: number }) {
-      wedgeProbe.renders++;
-      if (!program || !buffer || !map) { wedgeProbe.branch = `missing:${!program ? 'program' : !buffer ? 'buffer' : 'map'}`; return; }
+      if (!program || !buffer || !map) return;
       try {
         // The wedge is a flat-map horizon artefact; globe rides keep
         // the sky gradient alone, as shipped.
@@ -227,9 +220,9 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
           const p = (map as MlMap).getProjection?.() as unknown as { type?: string } | undefined;
           projectionType = p?.type;
         } catch { projectionType = undefined; }
-        if (projectionType === 'globe') { wedgeProbe.branch = 'globe-skip'; return; }
+        if (projectionType === 'globe') return;
         const rgba = hexToRgba01(colorRef.current);
-        if (!rgba) { wedgeProbe.branch = 'bad-color'; return; }
+        if (!rgba) return;
         /* Camera state from public getters and the render arguments
            only — the Map's transform is not public surface in this
            MapLibre version (map.transform is undefined at runtime;
@@ -270,8 +263,7 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.depthMask(true);
         gl.enable(gl.DEPTH_TEST);
-        wedgeProbe.branch = `drew:h=${u.horizon[1].toFixed(0)},pitch=${t.pitch},dist=${t.cameraToCenterDistance.toFixed(0)},w=${t.width},h=${t.height}`;
-      } catch (e) { wedgeProbe.branch = `threw:${e instanceof Error ? e.message : String(e)}`; }
+      } catch { /* a wedge failure must never break the map */ }
     },
   };
 }

@@ -23,7 +23,7 @@ import {
   PFD_BAND_HEIGHT_DESKTOP_PX, PFD_BAND_HEIGHT_MOBILE_PX,
   cockpitRidePadding, rideSkySpec, satelliteTileUrl,
 } from '@/lib/cockpit-pfd';
-import { RIDE_WEDGE_LAYER_ID, createRideWedgeLayer, wedgeProbe } from '@/lib/ride-wedge-layer';
+import { RIDE_WEDGE_LAYER_ID, createRideWedgeLayer } from '@/lib/ride-wedge-layer';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
 import { ALERT_KINDS, timeAgo, type AlertKind } from '@/lib/alert-digest';
@@ -3123,9 +3123,6 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           else map.addLayer(rideWedgeLayerRef.current);
           rideWedgeAddedRef.current = true;
         }
-        /* TEMP DIAGNOSTIC (wedge probe v2 — remove before final): */
-        wedgeProbe.effect = `spec,layer:${map.getLayer(RIDE_WEDGE_LAYER_ID) ? 'present' : 'ABSENT'},addedRef:${rideWedgeAddedRef.current}`;
-        (window as unknown as { __wedgeProbe?: unknown }).__wedgeProbe = wedgeProbe;
         map.triggerRepaint();
       } else if (rideSkyRestoreRef.current.captured) {
         const previous = rideSkyRestoreRef.current.sky;
