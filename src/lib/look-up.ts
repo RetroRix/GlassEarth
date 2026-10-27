@@ -1,4 +1,4 @@
-import { propagateTLE, type SatPosition } from './orbit';
+import type { SatPosition } from './orbit';
 import { haversine } from './geo';
 
 /**
@@ -6,9 +6,11 @@ import { haversine } from './geo';
  *
  * Three questions, all answered from machinery the app already runs:
  *
- *   - When does the ISS next pass over here? Propagated from its TLE with
- *     lib/orbit (the same satellite.js SGP4 the server positions and orbit
- *     tracks come from), scanned for horizon crossings.
+ *   - When does the ISS next pass over here? The passes route propagates
+ *     its TLE with lib/orbit (the same satellite.js SGP4 the server
+ *     positions and orbit tracks come from) and lib/look-up-passes scans
+ *     for horizon crossings — server-side, because satellite.js must
+ *     never enter the client bundle (see lib/look-up-passes).
  *   - What satellites are above the horizon now? Look angles computed from
  *     the satellite feed's own propagated positions — the very rows the
  *     map draws — so the panel can never disagree with the map.
@@ -139,7 +141,12 @@ export function isSunlit(target: SatPosition, when: Date): boolean {
   return norm(perp) >= WGS84_A_KM;
 }
 
-/* ── ISS passes ────────────────────────────────────────────────────────── */
+/* ── ISS passes ──────────────────────────────────────────── */
+
+/** A pass of the ISS over an observer. The finder itself lives in
+ * lib/look-up-passes (server-side only — see its header for why the
+ * propagator must never enter the client bundle); this type stays
+ * here because the panel renders it. */
 
 export interface IssPass {
   riseAt: Date;
@@ -157,101 +164,6 @@ export interface IssPass {
    * eclipsed — real, but not promised as visible.
    */
   visible: boolean;
-}
-
-export interface PassSearchOptions {
-  from?: Date;
-  /** How many passes to return. */
-  count?: number;
-  /** Search horizon; passes beyond it are not reported as absent, just not found. */
-  horizonHours?: number;
-  /** A pass must peak at or above this elevation to be listed at all. */
-  minPeakElevationDeg?: number;
-  /** Coarse scan step. A listed pass spends minutes near its peak, so 30 s
-   *  sampling cannot step over one; crossings are then refined exactly. */
-  stepSeconds?: number;
-}
-
-/**
- * The next ISS passes over an observer, propagated from the TLE with the
- * app's own SGP4 wrapper. Rise/set are the 0°-elevation crossings refined
- * by bisection; the peak is found by golden-section search between them.
- * Deterministic for a fixed TLE and start time.
- */
-export function findIssPasses(
-  line1: string,
-  line2: string,
-  observer: Observer,
-  opts: PassSearchOptions = {},
-): IssPass[] {
-  const from = opts.from ?? new Date();
-  const count = opts.count ?? 3;
-  const horizonMs = (opts.horizonHours ?? 72) * 3600_000;
-  const minPeak = opts.minPeakElevationDeg ?? 10;
-  const stepMs = (opts.stepSeconds ?? 30) * 1000;
-
-  const elevationAt = (t: number): { el: number; pos: SatPosition | null } => {
-    const pos = propagateTLE(line1, line2, new Date(t));
-    if (!pos) return { el: -90, pos: null };
-    return { el: lookAngle(observer, pos).elevationDeg, pos };
-  };
-
-  /** Bisect the elevation sign change in (a, b] down to ~1 s. */
-  const refineCrossing = (a: number, b: number): number => {
-    let lo = a;
-    let hi = b;
-    const loSign = elevationAt(lo).el > 0;
-    for (let i = 0; i < 40 && hi - lo > 1000; i++) {
-      const mid = (lo + hi) / 2;
-      if ((elevationAt(mid).el > 0) === loSign) lo = mid;
-      else hi = mid;
-    }
-    return (lo + hi) / 2;
-  };
-
-  const passes: IssPass[] = [];
-  const end = from.getTime() + horizonMs;
-  let prevT = from.getTime();
-  let inPass = elevationAt(prevT).el > 0;
-  let riseT = inPass ? prevT : 0;
-
-  for (let t = prevT + stepMs; t <= end && passes.length < count; t += stepMs) {
-    const { el } = elevationAt(t);
-    if (!inPass && el > 0) {
-      riseT = refineCrossing(prevT, t);
-      inPass = true;
-    } else if (inPass && el <= 0) {
-      const setT = refineCrossing(prevT, t);
-      // Peak: golden-section maximisation of elevation over [rise, set].
-      let a = riseT;
-      let b = setT;
-      const gr = (Math.sqrt(5) - 1) / 2;
-      let c = b - gr * (b - a);
-      let d2 = a + gr * (b - a);
-      for (let i = 0; i < 48; i++) {
-        if (elevationAt(c).el < elevationAt(d2).el) a = c;
-        else b = d2;
-        c = b - gr * (b - a);
-        d2 = a + gr * (b - a);
-      }
-      const peakT = (a + b) / 2;
-      const peak = elevationAt(peakT);
-      if (peak.pos && peak.el >= minPeak) {
-        const peakAngle = lookAngle(observer, peak.pos);
-        passes.push({
-          riseAt: new Date(riseT),
-          peakAt: new Date(peakT),
-          setAt: new Date(setT),
-          peakElevationDeg: peak.el,
-          peakAzimuthDeg: peakAngle.azimuthDeg,
-          visible: isSunlit(peak.pos, new Date(peakT)) && sunElevationDeg(observer, new Date(peakT)) <= -6,
-        });
-      }
-      inPass = false;
-    }
-    prevT = t;
-  }
-  return passes;
 }
 
 /* ── Overhead now ──────────────────────────────────────────────────────── */

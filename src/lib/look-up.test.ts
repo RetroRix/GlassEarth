@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   lookAngle, subsolarPoint, sunElevationDeg, isSunlit,
-  findIssPasses, overheadSatellites, overheadAircraft,
+  overheadSatellites, overheadAircraft,
   type Observer,
 } from './look-up';
+import { findIssPasses } from './look-up-passes';
 import { propagateTLE } from './orbit';
 
 /**

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crosshair, MapPin, Navigation, Plane, Satellite, Telescope, X } from 'lucide-react';
 import {
-  findIssPasses, overheadAircraft, overheadSatellites,
+  overheadAircraft, overheadSatellites,
   type FlightRowLike, type IssPass, type Observer, type SatelliteRowLike,
 } from '@/lib/look-up';
 import { compassPoint } from '@/lib/geo';
@@ -18,7 +18,9 @@ import { flightsSweepLanded } from '@/lib/share-target';
  * currently over your horizon, and the aircraft within 100 km. Every
  * number comes from a feed the app already runs — ISS passes propagated
  * from the catalogue's own TLE with lib/orbit (the SGP4 the map's
- * positions and orbit tracks use), satellites from the satellite feed's
+ * positions and orbit tracks use), computed by the passes route because
+ * the propagator cannot ride in the browser bundle (lib/look-up-passes),
+ * satellites from the satellite feed's
  * rows (the same rows the map draws, so the two cannot disagree), and
  * aircraft from the flight feed's buckets.
  *
@@ -58,11 +60,11 @@ interface LookUpPanelProps {
   onRefreshFeeds: () => void;
 }
 
-/* The ISS element set is the panel's to fetch once and keep: TLEs change
-   a few times a day, so an hour-old copy in module scope is fresh enough
-   and reopening the panel stays instant. */
-let issTleCache: { line1: string; line2: string; name: string; at: number } | null = null;
-const TLE_MAX_AGE_MS = 3600_000;
+/* The passes route's last answer for one anchor. Pass times are shown
+   to the minute, so a five-minute-old copy is fresh enough, and
+   reopening the panel — or flipping between anchors — stays instant. */
+let issPassesCache: { key: string; passes: IssPass[]; at: number } | null = null;
+const PASSES_CACHE_MS = 5 * 60_000;
 
 function fmtClock(d: Date): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -101,7 +103,7 @@ export default function LookUpPanel({
   const [fetchedGeo, setFetchedGeo] = useState<GeoLocation | null>(null);
   const [centreAnchor, setCentreAnchor] = useState<Observer | null>(null);
   const [preferCentre, setPreferCentre] = useState(false);
-  const [tleState, setTleState] = useState<'ready' | 'loading' | 'error'>(issTleCache ? 'ready' : 'loading');
+  const [passesState, setPassesState] = useState<'ready' | 'loading' | 'error'>('loading');
   const [passes, setPasses] = useState<IssPass[]>([]);
   const refreshedRef = useRef(false);
 
@@ -135,29 +137,6 @@ export default function LookUpPanel({
     return () => { cancelled = true; };
   }, [liveLocation, visitorGeo, fetchedGeo]);
 
-  /* The ISS element set, from the catalogue route the orbit track uses. */
-  useEffect(() => {
-    if (issTleCache && Date.now() - issTleCache.at < TLE_MAX_AGE_MS) {
-      setTleState('ready');
-      return;
-    }
-    let cancelled = false;
-    setTleState(issTleCache ? 'ready' : 'loading');
-    fetch(`/api/satellites/tle?id=${ISS_NORAD}`)
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => {
-        if (cancelled) return;
-        if (d?.line1 && d?.line2) {
-          issTleCache = { line1: d.line1, line2: d.line2, name: d.name ?? 'ISS', at: Date.now() };
-          setTleState('ready');
-        } else {
-          setTleState('error');
-        }
-      })
-      .catch(() => { if (!cancelled) setTleState('error'); });
-    return () => { cancelled = true; };
-  }, []);
-
   const location: (Observer & { source: 'gps' | 'ip'; city?: string; country?: string }) | null =
     liveLocation
       ? { lat: liveLocation.lat, lng: liveLocation.lng, source: 'gps' }
@@ -170,31 +149,58 @@ export default function LookUpPanel({
     ? (centreAnchor ?? (mapCenter ? { lat: mapCenter.lat, lng: mapCenter.lng } : null))
     : location;
 
-  /* Passes: recomputed when the TLE or anchor changes, and again once
-     the last listed pass has set — never on the one-second tick. */
   const anchorKey = anchor ? `${anchor.lat.toFixed(3)},${anchor.lng.toFixed(3)}` : '';
   const passesRef = useRef<IssPass[]>([]);
   useEffect(() => { passesRef.current = passes; }, [passes]);
+
+  /* Passes: fetched when the anchor changes, and again once the last
+     listed pass has set — never on the one-second tick. The route runs
+     the identical finder over the identical element set this panel used
+     to propagate locally; only the arithmetic's address changed. */
   useEffect(() => {
-    if (!issTleCache || !anchor) return;
+    if (!anchor) return;
     let cancelled = false;
-    const compute = () => {
-      if (cancelled || !issTleCache) return;
-      // Off the paint path: a 72 h scan at 30 s steps is a few hundred
-      // milliseconds of SGP4 on a slow phone.
-      setTimeout(() => {
-        if (cancelled || !issTleCache || !anchor) return;
-        setPasses(findIssPasses(issTleCache.line1, issTleCache.line2, anchor, { count: 3 }));
-      }, 0);
+    const load = () => {
+      if (cancelled || !anchor) return;
+      const cached = issPassesCache;
+      if (cached && cached.key === anchorKey && Date.now() - cached.at < PASSES_CACHE_MS) {
+        setPasses(cached.passes);
+        setPassesState('ready');
+        return;
+      }
+      fetch(`/api/satellites/passes?id=${ISS_NORAD}&lat=${anchor.lat}&lng=${anchor.lng}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+          if (cancelled) return;
+          if (Array.isArray(d?.passes)) {
+            const parsed: IssPass[] = d.passes.map((p: {
+              riseAt: string; peakAt: string; setAt: string;
+              peakElevationDeg: number; peakAzimuthDeg: number; visible: boolean;
+            }) => ({
+              riseAt: new Date(p.riseAt),
+              peakAt: new Date(p.peakAt),
+              setAt: new Date(p.setAt),
+              peakElevationDeg: p.peakElevationDeg,
+              peakAzimuthDeg: p.peakAzimuthDeg,
+              visible: !!p.visible,
+            }));
+            issPassesCache = { key: anchorKey, passes: parsed, at: Date.now() };
+            setPasses(parsed);
+            setPassesState('ready');
+          } else {
+            setPassesState('error');
+          }
+        })
+        .catch(() => { if (!cancelled) setPassesState('error'); });
     };
-    compute();
+    load();
     const iv = setInterval(() => {
       const last = passesRef.current[passesRef.current.length - 1];
-      if (!last || last.setAt.getTime() < Date.now()) compute();
+      if (!last || last.setAt.getTime() < Date.now()) load();
     }, 60_000);
     return () => { cancelled = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchorKey, tleState]);
+  }, [anchorKey]);
 
   const sats = useMemo(
     () => (anchor ? overheadSatellites(data.satellites ?? [], anchor, 12) : { above: [], totalAbove: 0 }),
@@ -293,14 +299,14 @@ export default function LookUpPanel({
             {/* ── ISS passes ── */}
             <div className="mb-4">
               <div className={sectionTitle}>Next ISS passes · times local</div>
-              {tleState === 'error' && (
+              {passesState === 'error' && (
                 <p className="mt-2 font-mono text-[9px] uppercase leading-relaxed tracking-wider text-white/40">
                   The ISS element set couldn&apos;t be reached — pass predictions are paused rather than guessed.
                 </p>
               )}
-              {tleState !== 'error' && passes.length === 0 && (
+              {passesState !== 'error' && passes.length === 0 && (
                 <p className="mt-2 font-mono text-[9px] uppercase leading-relaxed tracking-wider text-white/40">
-                  {tleState === 'loading' ? 'Loading the ISS element set…' : 'No ISS passes peaking above 10° in the next three days over this anchor.'}
+                  {passesState === 'loading' ? 'Working out the next passes…' : 'No ISS passes peaking above 10° in the next three days over this anchor.'}
                 </p>
               )}
               {nextPass && (
