@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TRAFFIC_SIM_DISCLAIMER, TRAFFIC_SIM_MAX_AGENTS, TRAFFIC_SIM_MIN_ZOOM,
   bearingDeg, buildRoadGraph, canTravel, haversineM, mulberry32,
-  normalizeOneway, nodeKey, positionOnSegment, spawnAgents, stepAgents,
+  normalizeOneway, nodeKey, positionOnSegment, roadClassOf, spawnAgents, stepAgents,
   targetAgentCount, turnAngleDeg, type RawRoadFeature, type RoadGraph,
 } from './traffic-sim';
 
@@ -115,6 +115,53 @@ describe('buildRoadGraph', () => {
     expect(seg.speedMps).toBeCloseTo(26.8);
     expect(seg.weight).toBeCloseTo(10 * seg.lengthM);
     expect(g.totalWeight).toBe(seg.weight);
+  });
+});
+
+describe('roadClassOf — both basemap vocabularies', () => {
+  it('reads Protomaps kind_detail as the OSM highway value', () => {
+    expect(roadClassOf({ kind: 'highway', kind_detail: 'motorway' })).toBe('motorway');
+    expect(roadClassOf({ kind: 'major_road', kind_detail: 'primary' })).toBe('primary');
+    expect(roadClassOf({ kind: 'minor_road', kind_detail: 'residential' })).toBe('residential');
+    expect(roadClassOf({ kind_detail: 'service' })).toBe('service');
+    expect(roadClassOf({ kind_detail: 'road' })).toBe('unclassified');
+  });
+
+  it('gives ramps their parent road class', () => {
+    expect(roadClassOf({ kind_detail: 'motorway_link' })).toBe('motorway');
+    expect(roadClassOf({ kind_detail: 'trunk_link' })).toBe('trunk');
+    expect(roadClassOf({ kind_detail: 'tertiary_link' })).toBe('tertiary');
+  });
+
+  it('falls back to Protomaps kind when detail is absent', () => {
+    expect(roadClassOf({ kind: 'highway' })).toBe('trunk');
+    expect(roadClassOf({ kind: 'major_road' })).toBe('primary');
+    expect(roadClassOf({ kind: 'medium_road' })).toBe('tertiary');
+    expect(roadClassOf({ kind: 'minor_road' })).toBe('minor');
+  });
+
+  it('drops what cars do not belong on, in either vocabulary', () => {
+    expect(roadClassOf({ kind: 'path', kind_detail: 'path' })).toBeNull();
+    expect(roadClassOf({ kind: 'path', kind_detail: 'steps' })).toBeNull();
+    expect(roadClassOf({ kind: 'path', kind_detail: 'cycleway' })).toBeNull();
+    expect(roadClassOf({ kind_detail: 'pedestrian' })).toBeNull();
+    expect(roadClassOf({ class: 'path' })).toBeNull();
+    expect(roadClassOf({})).toBeNull();
+    expect(roadClassOf(null)).toBeNull();
+    expect(roadClassOf(undefined)).toBeNull();
+  });
+
+  it('builds a graph from live-style Protomaps features (no one-way field anywhere)', () => {
+    const g = buildRoadGraph([
+      line([[-106.43, 31.78], [-106.42, 31.78]], { kind: 'highway', kind_detail: 'motorway', ref: 'I 10' }),
+      line([[-106.43, 31.79], [-106.42, 31.79]], { kind: 'minor_road', kind_detail: 'residential' }),
+      line([[-106.43, 31.8], [-106.42, 31.8]], { kind: 'path', kind_detail: 'path' }),
+    ]);
+    expect(g.segments).toHaveLength(2);
+    expect(g.segments[0].cls).toBe('motorway');
+    expect(g.segments[0].oneway).toBe(0); // direction unknown in this schema: two-way rule
+    const agents = spawnAgents(g, 12, mulberry32(2));
+    expect(agents.length).toBe(12);
   });
 });
 

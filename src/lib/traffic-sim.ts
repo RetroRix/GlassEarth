@@ -49,7 +49,7 @@ export const TRAFFIC_SIM_SETTLE_MS = 350;
 /** Weighted road-metres per agent: one vehicle per 4 km of class-weighted road. */
 const WEIGHTED_M_PER_AGENT = 4000;
 
-/** The road classes a car belongs on, in the basemap's (OpenMapTiles) vocabulary. */
+/** The road classes a car belongs on, keyed to the OSM highway values both basemap vocabularies carry. */
 export const DRIVABLE_CLASSES = [
   'motorway', 'trunk', 'primary', 'secondary', 'tertiary',
   'minor', 'unclassified', 'residential', 'living_street', 'service',
@@ -80,6 +80,48 @@ export const CLASS_WEIGHT: Record<DrivableClass, number> = {
   motorway: 10, trunk: 8, primary: 6, secondary: 4, tertiary: 3,
   minor: 2, unclassified: 2, residential: 1.5, living_street: 1, service: 0.6,
 };
+
+/**
+ * Which drivable class a basemap feature is, or null when it is not a
+ * road a car belongs on. Two vocabularies occur in the wild:
+ *
+ *   - Protomaps — CARTO's current GL styles (dark-matter and Positron
+ *     both): the `roads` source-layer carries `kind_detail`, the OSM
+ *     highway tag itself (motorway, primary, residential, …; ramps get
+ *     the `_link` suffix and take their parent road's class), with the
+ *     coarser `kind` (highway, major_road, medium_road, minor_road,
+ *     path) behind it. Verified against live tiles over El Paso,
+ *     2026-10-27: there is NO one-way field in this schema — direction
+ *     is unknown there, and the consistent-direction rule applies.
+ *   - OpenMapTiles — the older CARTO styles and other OMT sources:
+ *     `class` on the `transportation` source-layer, same highway values.
+ *
+ * Anything else — paths, steps, cycleways, footways, in either
+ * vocabulary — is not a car road and resolves to null.
+ */
+const KIND_DETAIL_CLASS: Record<string, DrivableClass> = {
+  motorway: 'motorway', motorway_link: 'motorway',
+  trunk: 'trunk', trunk_link: 'trunk',
+  primary: 'primary', primary_link: 'primary',
+  secondary: 'secondary', secondary_link: 'secondary',
+  tertiary: 'tertiary', tertiary_link: 'tertiary',
+  unclassified: 'unclassified', residential: 'residential',
+  living_street: 'living_street', service: 'service',
+  road: 'unclassified',
+};
+const KIND_CLASS: Record<string, DrivableClass> = {
+  highway: 'trunk', major_road: 'primary', medium_road: 'tertiary', minor_road: 'minor',
+};
+export function roadClassOf(properties: Record<string, unknown> | null | undefined): DrivableClass | null {
+  if (!properties) return null;
+  const omt = properties.class;
+  if (typeof omt === 'string' && DRIVABLE.has(omt)) return omt as DrivableClass;
+  const detail = properties.kind_detail;
+  if (typeof detail === 'string' && detail in KIND_DETAIL_CLASS) return KIND_DETAIL_CLASS[detail];
+  const kind = properties.kind;
+  if (typeof kind === 'string' && kind in KIND_CLASS) return KIND_CLASS[kind];
+  return null;
+}
 
 /** A road feature as the basemap tiles hand it over (GeoJSON-shaped). */
 export interface RawRoadFeature {
@@ -203,9 +245,9 @@ export function buildRoadGraph(features: readonly RawRoadFeature[]): RoadGraph {
   };
 
   for (const feature of features) {
-    const cls = String(feature.properties?.class ?? '');
-    if (!DRIVABLE.has(cls)) continue;
-    const oneway = normalizeOneway(feature.properties?.oneway);
+    const cls = roadClassOf(feature.properties);
+    if (!cls) continue;
+    const oneway = normalizeOneway(feature.properties?.oneway ?? feature.properties?.one_way);
     for (const part of lineParts(feature)) {
       // Collapse consecutive duplicates (tile clipping leaves them).
       const points: [number, number][] = [];

@@ -7,14 +7,19 @@
  * Attached while the layer is on, and it owns everything it draws, the
  * way the transit layer does:
  *
- *   - the roads come from the basemap itself — the CARTO vector styles
- *     (dark-matter / Positron) carry OpenMapTiles `transportation`
- *     features, already downloaded to draw the streets. Reading them
- *     with querySourceFeatures costs no new requests and works under
- *     the satellite overlay too (the vector source stays loaded; only
- *     its paint is covered). Directions' routers (Valhalla/OSRM) answer
- *     point-to-point routes only — neither offers viewport road
- *     geometry — so the tiles are the one honest source of roads here.
+ *   - the roads come from the basemap itself — the CARTO GL styles
+ *     (dark-matter / Positron) carry a vector source whose `roads`
+ *     source-layer (Protomaps schema; the older OpenMapTiles
+ *     `transportation` is tried as a fallback for other styles) is
+ *     already downloaded to draw the streets. Reading it with
+ *     querySourceFeatures costs no new requests and works under the
+ *     satellite overlay too (the vector source stays loaded; only
+ *     its paint is covered). Directions' routers (Valhalla/OSRM)
+ *     answer point-to-point routes only — neither offers viewport
+ *     road geometry — so the tiles are the one honest source of
+ *     roads here. (Schema verified against the live styles and tiles,
+ *     2026-10-27: an earlier draft of this layer assumed OpenMapTiles
+ *     naming throughout and would have found no roads at all.)
  *   - agents are rebuilt when the view settles (the house 350 ms
  *     settle), step at up to 30 fps while the tab is visible, and stop
  *     with the layer or the tab.
@@ -118,13 +123,17 @@ export function attachTrafficSim(map: MlMap, opts: TrafficSimLayerOptions): () =
   /** Road features for the current view from the basemap tiles, or null when no source answers yet. */
   const readRoads = (): RawRoadFeature[] | null => {
     for (const id of roadSourceCandidates()) {
-      try {
-        const feats = map.querySourceFeatures(id, { sourceLayer: 'transportation' });
-        if (feats.length) {
-          roadSourceId = id;
-          return feats as unknown as RawRoadFeature[];
-        }
-      } catch { /* that source has no transportation layer: try the next */ }
+      // CARTO's current styles name the layer 'roads' (Protomaps schema);
+      // OpenMapTiles styles call it 'transportation'. First hit wins.
+      for (const sourceLayer of ['roads', 'transportation']) {
+        try {
+          const feats = map.querySourceFeatures(id, { sourceLayer });
+          if (feats.length) {
+            roadSourceId = id;
+            return feats as unknown as RawRoadFeature[];
+          }
+        } catch { /* that source has no such layer: try the next */ }
+      }
     }
     return null;
   };
