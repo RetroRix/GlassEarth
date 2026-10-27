@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
 import { orbitPath, orbitalPeriodMinutes, splitAtAntimeridian } from '@/lib/orbit';
+import { resolveTle } from '@/lib/tle-catalogue';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,113 +14,11 @@ export const dynamic = 'force-dynamic';
  * already several megabytes for ~19,000 satellites, and an operator looks at
  * one orbit at a time.
  *
- * The TLE catalogue is the disk cache the satellites route already maintains.
- * Reading it here avoids a second fetch to CelesTrak, which rate-limits.
- *
- * On Vercel that disk cache does not exist on this route's instance — the
- * filesystem is per-instance and ephemeral, and the satellites route's writes
- * land on whichever instance served *it*. The catalogue therefore read as
- * empty in production and every orbit 404'd. Fallback: resolve the one TLE
- * asked for straight from CelesTrak's per-satellite GP endpoint (a single
- * three-line document, cached in memory) and only 404 when CelesTrak itself
- * has no such object.
+ * The TLE itself comes from lib/tle-catalogue — the disk cache the
+ * satellites route maintains, then CelesTrak's per-satellite GP endpoint,
+ * then a mirror — shared with the Look Up panel's TLE route so both always
+ * propagate the same element set for the same satellite.
  */
-
-const CACHE_FILE = join(process.cwd(), '.next', 'cache', 'satellites-tle-cache.json');
-
-interface Tle { name: string; line1: string; line2: string }
-
-let cache: { at: number; byNorad: Map<string, Tle> } | null = null;
-const CACHE_TTL_MS = 5 * 60_000;
-
-/** NORAD id lives in columns 3-7 of line 1. */
-function noradOf(line1: string): string {
-  return line1.substring(2, 7).trim();
-}
-
-function catalogue(): Map<string, Tle> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.byNorad;
-  const byNorad = new Map<string, Tle>();
-  try {
-    if (existsSync(CACHE_FILE)) {
-      const parsed = JSON.parse(readFileSync(CACHE_FILE, 'utf8')) as { sats?: Tle[] };
-      for (const sat of parsed.sats ?? []) {
-        if (sat?.line1 && sat?.line2) byNorad.set(noradOf(sat.line1), sat);
-      }
-    }
-  } catch {
-    // A corrupt cache means no orbits, not a broken map: the caller falls back
-    // to showing the satellite without its track.
-  }
-  cache = { at: Date.now(), byNorad };
-  return byNorad;
-}
-
-/** Per-satellite TLEs resolved remotely, keyed by NORAD id. A null is a
-    remembered miss — but only briefly: CelesTrak throttles shared
-    datacenter egress IPs intermittently, and a 30-minute negative cache
-    froze those transient 403s into permanent 404s for exactly the
-    satellites someone had clicked during a throttle window. */
-const remoteCache = new Map<string, { tle: Tle | null; at: number }>();
-const REMOTE_TTL_MS = 30 * 60_000;
-const REMOTE_MISS_TTL_MS = 60_000;
-
-function parseTleText(text: string): Tle | null {
-  const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0);
-  const i1 = lines.findIndex(l => l.startsWith('1 '));
-  const i2 = lines.findIndex(l => l.startsWith('2 '));
-  if (i1 < 0 || i2 <= i1) return null;
-  return { name: (lines[i1 - 1] ?? '').trim(), line1: lines[i1], line2: lines[i2] };
-}
-
-async function tleFromCelesTrak(id: string): Promise<Tle | null> {
-  try {
-    const res = await fetch(
-      `https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(id)}&FORMAT=TLE`,
-      { signal: AbortSignal.timeout(12000), headers: { Accept: 'text/plain' } },
-    );
-    if (res.ok) return parseTleText(await res.text());
-    await res.body?.cancel();
-  } catch {
-    // fall through to the retry / mirror
-  }
-  return null;
-}
-
-/** A public TLE mirror (Ivan Stanojevic's API over the same CelesTrak data).
-    Its catalogue lags CelesTrak by days to weeks, so it is the last resort:
-    a slightly stale TLE still draws the right orbit shape, while a 404
-    draws nothing. */
-async function tleFromMirror(id: string): Promise<Tle | null> {
-  try {
-    const res = await fetch(`https://tle.ivanstanojevic.me/api/tle/${encodeURIComponent(id)}`, {
-      signal: AbortSignal.timeout(12000),
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) { await res.body?.cancel(); return null; }
-    const data = await res.json();
-    if (typeof data?.line1 === 'string' && typeof data?.line2 === 'string') {
-      return { name: String(data.name ?? '').trim(), line1: data.line1, line2: data.line2 };
-    }
-  } catch {
-    // mirror unreachable: the caller 404s, as it did for an empty catalogue
-  }
-  return null;
-}
-
-async function tleRemote(id: string): Promise<Tle | null> {
-  const hit = remoteCache.get(id);
-  if (hit && Date.now() - hit.at < (hit.tle ? REMOTE_TTL_MS : REMOTE_MISS_TTL_MS)) return hit.tle;
-  let tle = await tleFromCelesTrak(id);
-  if (!tle) {
-    // One retry after a beat — the common failure is a throttle blip.
-    await new Promise(r => setTimeout(r, 1200));
-    tle = await tleFromCelesTrak(id);
-  }
-  if (!tle) tle = await tleFromMirror(id);
-  remoteCache.set(id, { tle, at: Date.now() });
-  return tle;
-}
 
 /**
  * The moment the track is drawn around.
@@ -151,7 +48,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'numeric NORAD id required' }, { status: 400 });
   }
 
-  const tle = catalogue().get(String(Number(id))) ?? (await tleRemote(String(Number(id))));
+  const tle = await resolveTle(id);
   if (!tle) {
     return NextResponse.json({ error: 'not in catalogue', noradId: id }, { status: 404 });
   }

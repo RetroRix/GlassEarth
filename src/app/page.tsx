@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useReducer, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, AudioLines, Dices, Home, ArrowLeft, Pin, PinOff } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, AudioLines, Dices, Home, ArrowLeft, Pin, PinOff, Telescope } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
@@ -48,6 +48,7 @@ import TvPanel from '@/components/TvPanel';
 import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
 import StationsPanel from '@/components/StationsPanel';
 import LaunchesPanel from '@/components/LaunchesPanel';
+import LookUpPanel from '@/components/LookUpPanel';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
 import RadioTuner from '@/components/RadioTuner';
 import MissionsCard from '@/components/MissionsCard';
@@ -284,6 +285,7 @@ export default function Dashboard() {
   const [tvWallSeed, setTvWallSeed] = useState<{ channels: TvChannel[]; favorites: TvChannel[] }>({ channels: [], favorites: [] });
   const [radioStation, setRadioStation] = useState<RadioStation | null>(null);
   const [showTuner, setShowTuner] = useState(false);
+  const [showLookUp, setShowLookUp] = useState(false);
   /* Dead-stream reports from the one playback owner — the Radio Tuner
      listens and auto-skips; nothing else consumes this. */
   const [radioFailure, setRadioFailure] = useState<{ uuid: string; at: number } | null>(null);
@@ -373,6 +375,9 @@ export default function Dashboard() {
   const linkTargetSweptRef = useRef(false);
   const [linkTargetNotice, setLinkTargetNotice] = useState<{ text: string; tone: 'missing' | 'found' } | null>(null);
   const [shareFocus, setShareFocus] = useState<{ kind: 'flight' | 'ship'; id: string; ts: number } | null>(null);
+  /* Look Up panel satellite focus: OsirisMap selects the satellite the
+     way a click on its marker does (readout + orbit track). */
+  const [focusSatellite, setFocusSatellite] = useState<{ noradId: string; ts: number } | null>(null);
   const [linkCopied, setLinkCopied] = useState<string | null>(null);
   /* Cockpit view (lib/cockpit): the ride's state machine. The map owns the
      follow camera; this owns entry, exit, and the view to come back to. */
@@ -778,7 +783,7 @@ export default function Dashboard() {
     riding: cockpitState.status === 'riding',
     panelOpen:
       showSpaceCam || showWall || showTv || showTvWall || showStations || showTuner ||
-      showSpotting || showMarkets || showAlerts || showOi || showDrawing ||
+      showSpotting || showLookUp || showMarkets || showAlerts || showOi || showDrawing ||
       showDirections || showDesktopSearch || showArcGIS || showRemote ||
       shareOpen,
   });
@@ -1717,6 +1722,38 @@ export default function Dashboard() {
     }
   }, []);
 
+  /* Look Up panel: keep the two feeds it reads fresh while it is open,
+     and run its row taps through the same focus paths a shared link (and
+     a map click) uses — identity-only re-finds, layer on, fly, popup. */
+  const refreshOverheadFeeds = useCallback(() => {
+    fetchEndpoint('/api/satellites', (d: any) => ({ ...d, satellites_at: d.timestamp }));
+    fetchEndpoint('/api/flights', normalizeFlightPayload);
+  }, [fetchEndpoint]);
+
+  const focusFlightFromPanel = useCallback((icao24: string) => {
+    const hit = findSharedFlight(dataRef.current as Record<string, unknown>, icao24);
+    if (!hit) return;
+    const entry = { icao24, callsign: hit.label };
+    setWatchedFlights(prev => (prev.some(w => w.icao24 === icao24) ? prev : [...prev, entry].slice(-6)));
+    if (hit.layerKey) {
+      const key = hit.layerKey;
+      setActiveLayers(prev => ((prev as Record<string, boolean>)[key] ? prev : { ...prev, [key]: true }));
+    }
+    setShareFocus({ kind: 'flight', id: icao24, ts: Date.now() });
+    setFlyToLocation({ lat: hit.lat, lng: hit.lng, zoom: 9, duration: 2600, ts: Date.now() });
+  }, []);
+
+  const focusSatelliteFromPanel = useCallback((noradId: string) => {
+    const rows = (dataRef.current as any)?.satellites as Array<{ noradId?: string; lat: number; lng: number }> | undefined;
+    const row = rows?.find(r => r.noradId === noradId);
+    if (!row) return;
+    setActiveLayers(prev => ((prev as any).satellites ? prev : { ...prev, satellites: true }));
+    // Satellites stop being drawn past zoom 7 (SAT_MAX_ZOOM): 4.5 keeps
+    // the marker, its ring and its track in frame.
+    setFlyToLocation({ lat: row.lat, lng: row.lng, zoom: 4.5, duration: 2600, ts: Date.now() });
+    setFocusSatellite({ noradId, ts: Date.now() });
+  }, []);
+
   /* Maritime fetch, viewport-aware: the current bounds ride along so the
      route can gather AISStream traffic for the area on screen (it answers
      for the rounded-degree cell, cached server-side for 90 s). The route's
@@ -2480,6 +2517,7 @@ export default function Dashboard() {
           alertPinIds={pinnedAlertIds}
           openCameraId={shareCameraId}
           shareFocus={shareFocus}
+          focusSatellite={focusSatellite}
           scanTargets={scanTargets}
           demoMode={demoMode}
           theme={osirisTheme}
@@ -2796,7 +2834,7 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} /></div>}
+      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} /></div>}
 
 
 
@@ -2922,6 +2960,13 @@ export default function Dashboard() {
             <Plane className={`w-4 h-4 ${showSpotting ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SPOTTING</span>
+        </div>
+
+        <div className="relative group">
+          <button onClick={() => { setShowLookUp(!showLookUp); setShowSpotting(false); setShowTuner(false); setShowStations(false); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showLookUp ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Look Up! — next ISS passes, satellites and aircraft overhead" aria-label="Look Up" aria-expanded={showLookUp}>
+            <Telescope className={`w-4 h-4 ${showLookUp ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">LOOK UP!</span>
         </div>
 
         <div ref={marketsAnchor} className="relative group">
@@ -3339,6 +3384,16 @@ export default function Dashboard() {
                         </span>
                       </button>
                       <button
+                        onClick={() => { setMobilePanel(null); setShowLookUp(true); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <Telescope className="h-4 w-4 shrink-0 text-[var(--gold-primary)]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">Look Up!</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">Next ISS passes · satellites & aircraft overhead right now</span>
+                        </span>
+                      </button>
+                      <button
                         onClick={() => { setMobilePanel(null); setTvWallSeed({ channels: [], favorites: loadTvFavorites() }); setShowTvWall(true); }}
                         className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
                       >
@@ -3364,7 +3419,7 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'9px'}}>NUC</div><div className="hud-value text-[10px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} />
+                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} />
                       <div className="mt-8">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       </div>
@@ -3592,6 +3647,20 @@ export default function Dashboard() {
         <PlaneSpottingPanel
           onClose={() => setShowSpotting(false)}
           onFlyTo={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
+        />
+      )}
+
+      {/* ── Look Up panel — ISS passes + overhead satellites/aircraft ── */}
+      {showLookUp && (
+        <LookUpPanel
+          data={data}
+          visitorGeo={geoRef.current}
+          liveLocation={liveLocation}
+          mapCenter={mapCenter}
+          onClose={() => setShowLookUp(false)}
+          onFocusFlight={focusFlightFromPanel}
+          onFocusSatellite={focusSatelliteFromPanel}
+          onRefreshFeeds={refreshOverheadFeeds}
         />
       )}
 

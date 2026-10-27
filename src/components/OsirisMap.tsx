@@ -165,6 +165,9 @@ interface OsirisMapProps {
    *  open its popup exactly as if it had been clicked. `ts` stamps each
    *  resolution so re-finding the same target later still registers. */
   shareFocus?: { kind: 'flight' | 'ship'; id: string; ts: number } | null;
+  /** Look Up panel focus: select this satellite exactly the way a click
+   *  on its marker does — readout card plus orbit track. */
+  focusSatellite?: { noradId: string; ts: number } | null;
   /** Ride along with this aircraft in the cockpit view (lib/cockpit). While
    *  set, the map's camera follows the aircraft; `locked` false means the
    *  visitor grabbed the map and the follow — not the ride — is paused. */
@@ -280,7 +283,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null, focusSatellite = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -375,6 +378,57 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     satLayerRef.current?.setSelected(null);
     satLayerRef.current?.setOrbit(null);
     setSelectedSat(null);
+  }, []);
+
+  /**
+   * Select the satellite at `idx` in satRowsRef — the whole selection: the
+   * readout card, the highlight ring, and the orbit track fetched for it.
+   * This is what a click on a marker does; the Look Up panel's focus
+   * request runs the very same code, so a panel tap and a map click can
+   * never drift into two behaviours.
+   */
+  const selectSatelliteAt = useCallback((idx: number) => {
+    const layer = satLayerRef.current;
+    const p = satRowsRef.current[idx];
+    if (!layer || !p) return;
+
+    // The readout is a panel, not a MapLibre popup: a popup can only anchor
+    // to a ground coordinate, and these markers are drawn at altitude. Any
+    // other layer's popup is still welcome to the screen, but not on top of
+    // this selection.
+    popupRef.current?.remove();
+    layer.setOrbit(null);
+    satPickedRef.current = idx;
+    satSelectedIdRef.current = p.noradId ?? null;
+    layer.setSelected(idx);
+    setSelectedSat({ ...p, periodMinutes: null, track: p.noradId ? 'loading' : 'unavailable' });
+
+    // Draw the selected satellite's orbit. Fetched per selection rather
+    // than bundled with the catalogue: that payload is already megabytes,
+    // and an operator looks at one orbit at a time.
+    if (p.noradId) {
+      const wanted = p.noradId;
+      // A slower reply for a satellite the operator has already moved on
+      // from must not draw over the one they are looking at now.
+      const stale = () => satSelectedIdRef.current !== wanted;
+      const mark = (track: SatelliteDetail['track'], periodMinutes: number | null = null) =>
+        setSelectedSat(prev => (prev && prev.noradId === wanted ? { ...prev, track, periodMinutes } : prev));
+      const at = satEpochRef.current;
+      fetch(`/api/satellites/orbit?id=${encodeURIComponent(wanted)}${at ? `&t=${at}` : ''}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+          if (stale()) return;
+          if (!d?.segments?.length) { mark('unavailable'); return; }
+          layer.setOrbit(
+            d.segments.map((seg: number[][]) => seg.map(([lng, lat, altKm]) => ({ lng, lat, altKm }))),
+            parseColor(satColorFor(p.category, p.color, paletteRef.current)),
+          );
+          mark('ready', typeof d.periodMinutes === 'number' ? d.periodMinutes : null);
+        })
+        // No track is fine; the satellite still shows — but the readout says so
+        // rather than sitting on 'plotting' forever.
+        .catch(() => { if (!stale()) mark('unavailable'); });
+    }
   }, []);
   const drawingCoordsRef = useRef<number[][]>([]);
 
@@ -1380,43 +1434,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // lit over nothing.
       if (idx == null || !p) { clearSat(); return; }
 
-      // The readout is a panel, not a MapLibre popup: a popup can only anchor
-      // to a ground coordinate, and these markers are drawn at altitude. Any
-      // other layer's popup is still welcome to the screen, but not on top of
-      // this selection.
-      popupRef.current?.remove();
-      layer.setOrbit(null);
-      satPickedRef.current = idx;
-      satSelectedIdRef.current = p.noradId ?? null;
-      layer.setSelected(idx);
-      setSelectedSat({ ...p, periodMinutes: null, track: p.noradId ? 'loading' : 'unavailable' });
-
-      // Draw the selected satellite's orbit. Fetched per click rather than
-      // bundled with the catalogue: that payload is already megabytes, and an
-      // operator looks at one orbit at a time.
-      if (p.noradId) {
-        const wanted = p.noradId;
-        // A slower reply for a satellite the operator has already moved on
-        // from must not draw over the one they are looking at now.
-        const stale = () => satSelectedIdRef.current !== wanted;
-        const mark = (track: SatelliteDetail['track'], periodMinutes: number | null = null) =>
-          setSelectedSat(prev => (prev && prev.noradId === wanted ? { ...prev, track, periodMinutes } : prev));
-        const at = satEpochRef.current;
-        fetch(`/api/satellites/orbit?id=${encodeURIComponent(wanted)}${at ? `&t=${at}` : ''}`)
-          .then(r => (r.ok ? r.json() : null))
-          .then(d => {
-            if (stale()) return;
-            if (!d?.segments?.length) { mark('unavailable'); return; }
-            layer.setOrbit(
-              d.segments.map((seg: number[][]) => seg.map(([lng, lat, altKm]) => ({ lng, lat, altKm }))),
-              parseColor(satColorFor(p.category, p.color, paletteRef.current)),
-            );
-            mark('ready', typeof d.periodMinutes === 'number' ? d.periodMinutes : null);
-          })
-          // No track is fine; the satellite still shows — but the readout says so
-          // rather than sitting on 'plotting' forever.
-          .catch(() => { if (!stale()) mark('unavailable'); });
-      }
+      selectSatelliteAt(idx);
     });
 
     // The cursor should say a satellite is clickable, like every other layer.
@@ -2269,6 +2287,27 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     satLayerRef.current?.setPoints(toSatPoints(filtered));
     resyncSatSelection(filtered);
   }, [mapReady, data.satellites, activeLayers.satellites, (activeLayers as any).sat_comms, (activeLayers as any).sat_military, (activeLayers as any).sat_navigation, (activeLayers as any).sat_earth, (activeLayers as any).sat_science, data.satellites_at, setGeo, toSatPoints, resyncSatSelection, clearSat]);
+
+  /* Look Up panel focus: the page turned the satellite layer on and flew
+     to the satellite; select it here exactly the way a click on its
+     marker does (selectSatelliteAt). Declared after the catalogue effect
+     above so satRowsRef already holds this commit's rows when it runs —
+     a request whose row has not landed yet stays unconsumed and the next
+     data tick retries it. Guarded like every map touch (AGENTS.md):
+     style loaded, and any failure degrades to "centred, no readout". */
+  const satFocusHandledRef = useRef(0);
+  useEffect(() => {
+    if (!focusSatellite || !mapReady || satFocusHandledRef.current === focusSatellite.ts) return;
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      if (!map.loaded()) return; // style not settled yet — a later data tick retries
+      const idx = satRowsRef.current.findIndex(r => r.noradId === focusSatellite.noradId);
+      if (idx < 0) return; // catalogue not landed yet, or the satellite left it
+      satFocusHandledRef.current = focusSatellite.ts;
+      selectSatelliteAt(idx);
+    } catch { /* the page already flew there; the readout is a garnish */ }
+  }, [focusSatellite, mapReady, data, selectSatelliteAt]);
 
   useEffect(() => {
     if (!mapReady) return;
