@@ -107,6 +107,7 @@ const LAYER_GROUPS: LayerGroupDef[] = [
     icon: Bus,
     layers: [
       { key: 'transit', label: 'Live Buses & Transit', description: 'Operator GPS feeds · every 20 s', dataKey: '' },
+      { key: 'traffic_sim', label: 'Traffic (Simulated)', description: 'Simulated vehicles for visualisation — not live traffic data', dataKey: '' },
     ],
   },
   {

@@ -28,6 +28,7 @@ import CockpitOSD, { CockpitEndedNotice, type CockpitFlightRecord } from '@/comp
 import { EMPTY_ROUTE_GEOMETRY, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import { stopsAhead, type NavProgress } from '@/lib/navigation';
 import type { TransitStatus } from '@/lib/transit-layer';
+import type { TrafficSimStatus } from '@/lib/traffic-sim-layer';
 import type { LiveDetection } from '@/lib/malware-intel';
 import ScaleBar from '@/components/ScaleBar';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -711,6 +712,8 @@ export default function Dashboard() {
   const [arcgisLayers, setArcgisLayers] = useState<Array<{ id: string; title: string; url: string; geojson: any; color: string; visible: boolean; opacity: number }>>([]);
   /* What Live Transit can see right now, for its row in the layer panel. */
   const [transitStatus, setTransitStatus] = useState<TransitStatus | null>(null);
+  /* What the simulated-traffic layer is doing, for its row in the panel. */
+  const [trafficSimStatus, setTrafficSimStatus] = useState<TrafficSimStatus | null>(null);
   /* What the flight feed is doing right now, for the counter strip and the
      aviation rows in the layer panel. The feed backs all four aviation rows,
      so while it is loading or retrying, say so under each of them instead of
@@ -723,6 +726,7 @@ export default function Dashboard() {
   const layerLiveStatus = useMemo(() => {
     const status: Record<string, string> = {};
     if (transitStatus) status.transit = transitStatus.text;
+    if (trafficSimStatus) status.traffic_sim = trafficSimStatus.text;
     if (maritimeStatus) status.maritime = maritimeStatus;
     if (flightsStatus === 'loading') {
       status.flights = 'Loading flights…';
@@ -736,7 +740,7 @@ export default function Dashboard() {
       status.military = 'Flights unavailable — retrying';
     }
     return Object.keys(status).length ? status : undefined;
-  }, [transitStatus, flightsStatus, maritimeStatus]);
+  }, [transitStatus, trafficSimStatus, flightsStatus, maritimeStatus]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
   /* The viewport bounds as a ref: the maritime poll reads them on its own
      cadence, long after the render that produced them. */
@@ -948,6 +952,10 @@ export default function Dashboard() {
     /* Buses and other transit from operators' GPS feeds — see lib/transit.
        Off until asked for: it is city-scale, and reads feeds only for the view. */
     transit: false,
+    /* SIMULATED vehicles flowing on the basemap's roads (lib/traffic-sim) —
+       visualisation only, never live traffic data, named so in the panel.
+       Off until asked for, like transit. */
+    traffic_sim: false,
     // On from the start: the orbiting fleet around the globe is the first
     // thing the splash lifts onto.
     satellites: true,
@@ -2524,6 +2532,7 @@ export default function Dashboard() {
           arcgisLayers={arcgisLayers.filter(l => l.visible).map(l => ({ id: l.id, title: l.title, geojson: l.geojson, color: l.color, opacity: l.opacity }))}
           onMapCenter={setMapCenter}
           onTransitStatus={setTransitStatus}
+          onTrafficSimStatus={setTrafficSimStatus}
           route={activeRoute}
           userLocation={
             navSession && navProgress

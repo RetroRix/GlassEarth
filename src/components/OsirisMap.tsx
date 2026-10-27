@@ -52,6 +52,7 @@ import { attachTerrain, type TerrainStatus } from '@/lib/map-terrain';
 
 import { applyMapProjection } from '@/lib/map-projection';
 import { attachTransit, type TransitStatus } from '@/lib/transit-layer';
+import { attachTrafficSim, type TrafficSimStatus } from '@/lib/traffic-sim-layer';
 
 /** The catalogue fields the satellite layer and its popup actually read. */
 interface SatelliteRow {
@@ -139,6 +140,8 @@ interface OsirisMapProps {
   onMapCenter?: (coords: { lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } }) => void;
   /** What the Live Transit layer can see, for the layer panel; null while it is off. */
   onTransitStatus?: (status: TransitStatus | null) => void;
+  /** What the SIMULATED traffic layer is doing, for the layer panel; null while it is off. */
+  onTrafficSimStatus?: (status: TrafficSimStatus | null) => void;
   /** Active turn-by-turn route drawn as a line with origin/destination pins. */
   route?: {
     geometry: { type: 'LineString'; coordinates: [number, number][] };
@@ -283,7 +286,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null, focusSatellite = null }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, onTrafficSimStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null, focusSatellite = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -4058,6 +4061,22 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       onTransitStatusRef.current?.(null);
     };
   }, [mapReady, activeLayers.transit]);
+
+  // ── SIMULATED TRAFFIC ── see lib/traffic-sim-layer: invented vehicles on
+  // the basemap's roads, for visualisation only — never live traffic data.
+  const onTrafficSimStatusRef = useRef(onTrafficSimStatus);
+  useEffect(() => { onTrafficSimStatusRef.current = onTrafficSimStatus; }, [onTrafficSimStatus]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !activeLayers.traffic_sim) return;
+    const detach = attachTrafficSim(map, {
+      onStatus: status => onTrafficSimStatusRef.current?.(status),
+    });
+    return () => {
+      detach();
+      onTrafficSimStatusRef.current?.(null);
+    };
+  }, [mapReady, activeLayers.traffic_sim]);
 
   // ── MAP CENTER REPORTING ──
   useEffect(() => {
