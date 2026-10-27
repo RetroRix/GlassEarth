@@ -45,6 +45,7 @@ import ArcGISPanel from '@/components/ArcGISPanel';
 import TvPanel from '@/components/TvPanel';
 import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
 import StationsPanel from '@/components/StationsPanel';
+import LaunchesPanel from '@/components/LaunchesPanel';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
 import { loadTvFavorites, type RadioStation, type TvChannel } from '@/lib/stations';
 const TvWall = dynamic(() => import('@/components/TvWall'), { ssr: false });
@@ -818,6 +819,9 @@ export default function Dashboard() {
     cyclones: false,
     /* WFIGS/NIFC wildfire perimeters + incident locations. Off by default. */
     fire_perimeters: false,
+    /* Launch Library 2 rocket launches: site markers + countdown panel.
+       Off until asked for, like the other space layers. */
+    launches: false,
     /* Satellite date comparison (NASA HLS via GIBS): A/B swipe of daily
        30 m imagery over the last 30 days — see lib/date-compare and
        DateCompareBar. Off until asked for, like the other imagery. */
@@ -3112,6 +3116,14 @@ export default function Dashboard() {
           feeds={data.live_feeds ?? []}
           services={data.tv_services ?? []}
           onClose={() => setShowTv(false)}
+        />
+      )}
+
+      {/* ── Launches panel (Launch Library 2) — rides with its layer ── */}
+      {activeLayers.launches && (
+        <LaunchesPanel
+          onClose={() => setActiveLayers(prev => ({ ...prev, launches: false }))}
+          onLocate={(lat, lng, zoom) => setFlyToLocation({ lat, lng, zoom, ts: Date.now() })}
         />
       )}
 
