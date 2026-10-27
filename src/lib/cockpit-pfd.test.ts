@@ -218,11 +218,23 @@ describe('ride sky', () => {
     expect(b).toBeGreaterThan(r); // blue-dominant overhead
     expect(b).toBeGreaterThan(g);
     // The gradient runs dark-to-light downward: the horizon haze is
-    // far lighter than the zenith, and the fog the ground melts into
-    // sits between them, close to the haze.
+    // far lighter than the zenith.
     expect(luminance(RIDE_SKY_DAY['horizon-color'])).toBeGreaterThan(luminance(RIDE_SKY_DAY['sky-color']) + 0.3);
-    expect(luminance(RIDE_SKY_DAY['fog-color'])).toBeGreaterThan(luminance(RIDE_SKY_DAY['sky-color']));
-    expect(luminance(RIDE_SKY_DAY['fog-color'])).toBeLessThanOrEqual(luminance(RIDE_SKY_DAY['horizon-color']));
+  });
+
+  it('the ground melts into the exact colour the sky starts from', () => {
+    // fog == horizon is the seam trick: at the horizon line the
+    // fogged far ground and the sky's first colour are one colour.
+    expect(RIDE_SKY_DAY['fog-color']).toBe(RIDE_SKY_DAY['horizon-color']);
+    expect(RIDE_SKY_NIGHT['fog-color']).toBe(RIDE_SKY_NIGHT['horizon-color']);
+  });
+
+  it('the physical atmosphere pass stays off — it ignores the palette', () => {
+    // At its 0.8 default the renderer's Rayleigh/Mie pass washed the
+    // horizon band to near-white regardless of these colours
+    // (measured in the first live ride). Rides use the plain gradient.
+    expect(RIDE_SKY_DAY['atmosphere-blend']).toBe(0);
+    expect(RIDE_SKY_NIGHT['atmosphere-blend']).toBe(0);
   });
 
   it('night sky: deep indigo overhead, a dimmer dusk glow at the horizon', () => {

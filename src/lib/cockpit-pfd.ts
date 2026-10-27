@@ -198,38 +198,54 @@ export interface RideSkySpec {
   'sky-horizon-blend': number;
   'horizon-fog-blend': number;
   'fog-ground-blend': number;
+  'atmosphere-blend': number;
 }
 
 /**
- * Daytime: a real atmospheric gradient — a deeper blue overhead
- * melting through pale haze at the horizon line. The fog colour sits
- * a touch deeper than the horizon colour so the far ground keeps a
- * little body as it melts into the haze; the blends hand the far
- * ground to the fog and the fog to the sky gradually, so the hard
- * straight edge where the tiles run out dissolves instead of cutting.
+ * How the values below were chosen (rendered and measured, not
+ * guessed): the renderer's sky pass is a plain gradient — the
+ * horizon colour AT the horizon line, easing quadratically up to
+ * the sky colour over `sky-horizon-blend` × half the screen height
+ * in pixels (0.5 ≈ 225px on a 900px screen — the whole sky band of
+ * a ride). The fog colour is set EQUAL to the horizon colour, so
+ * the far ground melts into exactly the colour the sky starts from
+ * and the join has no seam. And `atmosphere-blend` is 0: left at
+ * its 0.8 default, the renderer's physical atmosphere pass (fixed
+ * Rayleigh/Mie constants, none of these colours) washes the whole
+ * horizon band to a near-white dome that ignores the palette — the
+ * measured failure of the first tuning. Rides fly under the plain,
+ * predictable gradient instead.
+ */
+
+/**
+ * Daytime: a deeper blue overhead melting to a pale blue haze at
+ * the horizon — the haze the far ground dissolves into, so the hard
+ * straight edge where the tiles run out softens instead of cutting.
  */
 export const RIDE_SKY_DAY: RideSkySpec = {
   'sky-color': '#2e63a8',
-  'horizon-color': '#d9e8f4',
-  'fog-color': '#c8dcee',
+  'horizon-color': '#cfe2f2',
+  'fog-color': '#cfe2f2',
   'sky-horizon-blend': 0.5,
   'horizon-fog-blend': 0.5,
   'fog-ground-blend': 0.5,
+  'atmosphere-blend': 0,
 };
 
 /**
- * Night: the same construction after dark — deep indigo overhead,
- * a dusky blue glow left on the horizon, the ground melting into a
- * blue-grey murk. Bright enough at the horizon to read as sky rather
- * than the old near-black space backdrop the globe wears.
+ * Night: the same construction after dark — deep indigo overhead
+ * and a dusky blue glow on the horizon for the ground to melt into.
+ * Bright enough at the horizon to read as sky rather than the old
+ * near-black space backdrop the globe wears.
  */
 export const RIDE_SKY_NIGHT: RideSkySpec = {
-  'sky-color': '#0a1122',
-  'horizon-color': '#3d4f73',
-  'fog-color': '#26334e',
+  'sky-color': '#0d1830',
+  'horizon-color': '#46587a',
+  'fog-color': '#46587a',
   'sky-horizon-blend': 0.5,
   'horizon-fog-blend': 0.5,
   'fog-ground-blend': 0.5,
+  'atmosphere-blend': 0,
 };
 
 /**
