@@ -6,7 +6,7 @@ import * as maplibregl from 'maplibre-gl';
 import type { Map as MlMap, RasterTileSource } from 'maplibre-gl';
 import {
   addDays, cachedProbe, clampToWindow, DC_MIN_GOOD_ZOOM, DC_SENSORS, diffDays, formatDcDate,
-  gibsTiles, headProbe, isoDay, resolveSide, sampleTiles, windowEnding,
+  dcTiles, headProbe, isoDay, resolveSide, sampleTiles, windowEnding,
   type DcResolved, type DcWindow,
 } from '@/lib/date-compare';
 import { applyMapProjection } from '@/lib/map-projection';
@@ -220,7 +220,7 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     const r = sideB?.resolved;
     if (!overlay) return;
     const apply = () => {
-      const tiles = r ? gibsTiles(r.sensor, r.actual) : gibsTiles('s30', '2000-01-01');
+      const tiles = r ? dcTiles(r.sensor, r.actual) : dcTiles('s30', '2000-01-01');
       if (!overlay.getSource(B_SRC)) {
         overlay.addSource(B_SRC, {
           type: 'raster', tileSize: 256, maxzoom: 12,
@@ -247,7 +247,7 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     void styleTick;
     const r = sideA?.resolved;
     const before = beneath(map);
-    const tiles = r ? gibsTiles(r.sensor, r.actual) : gibsTiles('s30', '2000-01-01');
+    const tiles = r ? dcTiles(r.sensor, r.actual) : dcTiles('s30', '2000-01-01');
     if (!map.getSource(A_SRC)) {
       map.addSource(A_SRC, {
         type: 'raster', tileSize: 256, maxzoom: 12,

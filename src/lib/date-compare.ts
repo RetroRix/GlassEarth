@@ -79,6 +79,36 @@ export function gibsTiles(sensor: DcSensor, dateIso: string): string[] {
   return [`${GIBS}/${DC_SENSORS[sensor].layer}/default/${dateIso}/GoogleMapsCompatible_Level12/{z}/{y}/{x}.png`];
 }
 
+/* The browser never talks to GIBS directly: tiles and probes ride the
+   app's own /api/date-compare/tile route (the pattern the rest of the
+   app uses for third-party data), so the comparison keeps working on
+   networks that restrict direct third-party requests, and the probe
+   reads the route's passed-through layer-time-actual header — the same
+   ground truth, one hop closer. */
+export function dcTileUrl(sensor: DcSensor, dateIso: string, z: number, x: number, y: number): string {
+  return `/api/date-compare/tile?l=${sensor}&d=${dateIso}&z=${z}&x=${x}&y=${y}`;
+}
+
+/** MapLibre template form of dcTileUrl. */
+export function dcTiles(sensor: DcSensor, dateIso: string): string[] {
+  return [`/api/date-compare/tile?l=${sensor}&d=${dateIso}&z={z}&x={x}&y={y}`];
+}
+
+export interface DcTileParams { sensor: DcSensor; date: string; z: number; x: number; y: number }
+
+/** Validate tile-route query params. Null = reject (400). */
+export function parseDcTileParams(q: URLSearchParams): DcTileParams | null {
+  const l = q.get('l');
+  const d = q.get('d');
+  if (l !== 's30' && l !== 'l30') return null;
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(`${d}T00:00:00Z`))) return null;
+  const z = Number(q.get('z')); const x = Number(q.get('x')); const y = Number(q.get('y'));
+  if (!Number.isInteger(z) || z < 0 || z > DC_TILE_ZOOM) return null;
+  const max = 2 ** z;
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= max || y >= max) return null;
+  return { sensor: l, date: d, z, x, y };
+}
+
 /* ── Calendar ─────────────────────────────────────────────────────────
    All dates are UTC calendar days in ISO form (YYYY-MM-DD) — the form
    GIBS takes — so nothing here depends on the visitor's timezone. */
@@ -235,7 +265,7 @@ export function headProbe(fetchFn: typeof fetch = fetch): DcProbe {
   return async (sensor, dateIso, tiles) => {
     const hits = await Promise.all(tiles.map(async t => {
       try {
-        const res = await fetchFn(gibsTileUrl(sensor, dateIso, t.z, t.x, t.y), {
+        const res = await fetchFn(dcTileUrl(sensor, dateIso, t.z, t.x, t.y), {
           method: 'HEAD',
           // A stalled probe must read as "no data", never hang the walk.
           signal: AbortSignal.timeout(10_000),

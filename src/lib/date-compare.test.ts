@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDays, cachedProbe, clampToWindow, diffDays, formatDcDate, gibsTileUrl, gibsTiles,
-  headProbe, parseGibsLatest, resolveSide, sampleTiles, snapCandidates, tileXY, windowEnding,
+  addDays, cachedProbe, clampToWindow, dcTileUrl, dcTiles, diffDays, formatDcDate, gibsTileUrl, gibsTiles,
+  headProbe, parseDcTileParams, parseGibsLatest, resolveSide, sampleTiles, snapCandidates, tileXY, windowEnding,
   type DcProbe, type DcTile,
 } from './date-compare';
 
@@ -114,6 +114,35 @@ describe('headProbe', () => {
     const boom = (async () => { throw new Error('net'); }) as unknown as typeof fetch;
     expect(await headProbe(boom)('l30', '2026-10-24', tile)).toBe(false);
     expect(await headProbe(fakeFetch({ 'layer-time-actual': 'x' }, false))('l30', '2026-10-24', tile)).toBe(false);
+  });
+});
+
+describe('the same-origin tile hop', () => {
+  it('builds app-relative tile URLs for probes and sources', () => {
+    expect(dcTileUrl('s30', '2026-10-24', 12, 828, 1647)).toBe(
+      '/api/date-compare/tile?l=s30&d=2026-10-24&z=12&x=828&y=1647');
+    expect(dcTiles('l30', '2026-10-23')[0]).toBe(
+      '/api/date-compare/tile?l=l30&d=2026-10-23&z={z}&x={x}&y={y}');
+  });
+  it('probes ask the app route, never GIBS directly', async () => {
+    const seen: string[] = [];
+    const spy = (async (u: string) => {
+      seen.push(String(u));
+      return { ok: true, headers: { get: () => '2026-10-24T00:00:00Z' } };
+    }) as unknown as typeof fetch;
+    expect(await headProbe(spy)('s30', '2026-10-24', TILES)).toBe(true);
+    expect(seen[0]).toMatch(/^\/api\/date-compare\/tile\?/);
+  });
+  it('validates tile params and rejects anything off-spec', () => {
+    const q = (s: string) => new URLSearchParams(s);
+    expect(parseDcTileParams(q('l=s30&d=2026-10-24&z=12&x=828&y=1647'))).toEqual(
+      { sensor: 's30', date: '2026-10-24', z: 12, x: 828, y: 1647 });
+    expect(parseDcTileParams(q('l=viirs&d=2026-10-24&z=12&x=1&y=1'))).toBeNull();
+    expect(parseDcTileParams(q('l=s30&d=24-10-2026&z=12&x=1&y=1'))).toBeNull();
+    expect(parseDcTileParams(q('l=s30&d=2026-13-40&z=12&x=1&y=1'))).toBeNull();
+    expect(parseDcTileParams(q('l=s30&d=2026-10-24&z=13&x=1&y=1'))).toBeNull();
+    expect(parseDcTileParams(q('l=s30&d=2026-10-24&z=12&x=4096&y=1'))).toBeNull();
+    expect(parseDcTileParams(q('l=s30&d=2026-10-24&z=12&x=-1&y=1'))).toBeNull();
   });
 });
 
