@@ -21,7 +21,7 @@ import {
 import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import {
   PFD_BAND_HEIGHT_DESKTOP_PX, PFD_BAND_HEIGHT_MOBILE_PX,
-  cockpitRidePadding, rideSkySpec, satelliteTileUrl,
+  cockpitRidePadding, rideBackgroundLayerIds, rideSkySpec, satelliteTileUrl,
 } from '@/lib/cockpit-pfd';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
@@ -3084,9 +3084,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
      on the way out — the globe's space sky included; setSky with no
      sky removes one the map never had. Keyed to the theme, not the
      basemap, so a satellite-failure fallback keeps the same sky. */
-  const rideSkyRestoreRef = useRef<{ captured: boolean; sky: ReturnType<maplibregl.Map['getSky']> | undefined }>({
-    captured: false, sky: undefined,
-  });
+  const rideSkyRestoreRef = useRef<{
+    captured: boolean;
+    sky: ReturnType<maplibregl.Map['getSky']> | undefined;
+    backgrounds: { id: string; color: unknown }[];
+  }>({ captured: false, sky: undefined, backgrounds: [] });
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
@@ -3096,16 +3098,33 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         if (!rideSkyRestoreRef.current.captured) {
           let previous: ReturnType<maplibregl.Map['getSky']> | undefined;
           try { previous = map.getSky(); } catch { previous = undefined; }
-          rideSkyRestoreRef.current = { captured: true, sky: previous };
+          /* The wedge between the ground's far edge and the horizon is
+             not the sky's to paint — the style's background layer shows
+             there in its flat basemap colour — so the background layers
+             are captured too and recoloured to the sky's horizon colour
+             for the ride (lib/cockpit-pfd: rideBackgroundLayerIds). */
+          const backgrounds: { id: string; color: unknown }[] = [];
+          try {
+            for (const id of rideBackgroundLayerIds(map.getStyle()?.layers ?? [])) {
+              backgrounds.push({ id, color: map.getPaintProperty(id, 'background-color') });
+            }
+          } catch { /* style not settled — the sky still applies */ }
+          rideSkyRestoreRef.current = { captured: true, sky: previous, backgrounds };
         }
         map.setSky(spec);
+        for (const bg of rideSkyRestoreRef.current.backgrounds) {
+          try { map.setPaintProperty(bg.id, 'background-color', spec['horizon-color']); } catch { /* layer gone */ }
+        }
       } else if (rideSkyRestoreRef.current.captured) {
-        const previous = rideSkyRestoreRef.current.sky;
-        rideSkyRestoreRef.current = { captured: false, sky: undefined };
+        const { sky: previous, backgrounds } = rideSkyRestoreRef.current;
+        rideSkyRestoreRef.current = { captured: false, sky: undefined, backgrounds: [] };
         /* A captured "no sky" restores by passing none — MapLibre's
            runtime removes the sky for a missing spec, though its
            public typing only admits a spec object; hence the cast. */
         map.setSky(previous as maplibregl.SkySpecification);
+        for (const bg of backgrounds) {
+          try { map.setPaintProperty(bg.id, 'background-color', bg.color as never); } catch { /* layer gone */ }
+        }
       }
     } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
   }, [mapReady, cockpitTarget, theme, projection]);

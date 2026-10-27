@@ -12,6 +12,7 @@ import {
   fullscreenTransition,
   RIDE_SKY_DAY,
   RIDE_SKY_NIGHT,
+  rideBackgroundLayerIds,
   rideSkySpec,
   satelliteTileUrl,
   tapeAnchorFor,
@@ -251,6 +252,32 @@ describe('ride sky', () => {
         expect(spec[key]).toBeGreaterThan(0);
         expect(spec[key]).toBeLessThanOrEqual(1);
       }
+    }
+  });
+});
+
+describe('ride background wedge', () => {
+  it('picks exactly the background layers, in style order', () => {
+    const layers = [
+      { id: 'background', type: 'background' },
+      { id: 'water', type: 'fill' },
+      { id: 'satellite-layer', type: 'raster' },
+      { id: 'bg-underlay', type: 'background' },
+      { id: 'labels', type: 'symbol' },
+    ];
+    expect(rideBackgroundLayerIds(layers)).toEqual(['background', 'bg-underlay']);
+  });
+
+  it('no background layer, no override — the map is left alone', () => {
+    expect(rideBackgroundLayerIds([{ id: 'water', type: 'fill' }])).toEqual([]);
+    expect(rideBackgroundLayerIds([])).toEqual([]);
+  });
+
+  it('the wedge wears the horizon colour — the sky and fog seam colour', () => {
+    // The override paints background layers with the spec's horizon
+    // colour; pin that the colour it will wear is the seam colour.
+    for (const spec of [RIDE_SKY_DAY, RIDE_SKY_NIGHT]) {
+      expect(spec['horizon-color']).toBe(spec['fog-color']);
     }
   });
 });
