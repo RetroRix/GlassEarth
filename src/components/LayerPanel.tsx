@@ -135,6 +135,7 @@ const LAYER_GROUPS: LayerGroupDef[] = [
       { key: 'fires', label: 'Active Fires', dataKey: 'fires' },
       { key: 'weather', label: 'Severe Weather', dataKey: 'weather_events' },
       { key: 'cyclones', label: 'Tropical Cyclones', description: 'NHC / CPHC · forecast cone + track', dataKey: '' },
+      { key: 'fire_perimeters', label: 'Wildfire Perimeters', description: 'WFIGS / NIFC · reported perimeters + incidents', dataKey: '' },
     ],
   },
   {

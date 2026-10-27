@@ -816,6 +816,8 @@ export default function Dashboard() {
     lightning: false,
     /* NHC/CPHC tropical cyclones: forecast cone + track. Off by default. */
     cyclones: false,
+    /* WFIGS/NIFC wildfire perimeters + incident locations. Off by default. */
+    fire_perimeters: false,
     /* Satellite date comparison (NASA HLS via GIBS): A/B swipe of daily
        30 m imagery over the last 30 days — see lib/date-compare and
        DateCompareBar. Off until asked for, like the other imagery. */

@@ -35,6 +35,7 @@ import RainBar from '@/components/RainBar';
 import WxImageryBar from '@/components/WxImageryBar';
 import DateCompareBar from '@/components/DateCompareBar';
 import CycloneLayers from '@/components/CycloneLayers';
+import FirePerimeterLayers from '@/components/FirePerimeterLayers';
 import { DOCK } from '@/components/TimeBox';
 import LiveNewsPreviews, { type PreviewFeed } from '@/components/LiveNewsPreviews';
 import { attachTerrain, type TerrainStatus } from '@/lib/map-terrain';
@@ -3801,6 +3802,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         </div>
       )}
       {mapReady && activeLayers.cyclones && <CycloneLayers mapRef={mapRef} mapStyle={mapStyle} />}
+      {mapReady && activeLayers.fire_perimeters && <FirePerimeterLayers mapRef={mapRef} mapStyle={mapStyle} />}
     </>
   );
 }
