@@ -216,31 +216,39 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
       buffer = null;
     },
 
-    render(gl: WebGLRenderingContext | WebGL2RenderingContext) {
+    render(gl: WebGLRenderingContext | WebGL2RenderingContext, options?: { fov?: number }) {
       wedgeProbe.renders++;
       if (!program || !buffer || !map) { wedgeProbe.branch = `missing:${!program ? 'program' : !buffer ? 'buffer' : 'map'}`; return; }
       try {
         // The wedge is a flat-map horizon artefact; globe rides keep
         // the sky gradient alone, as shipped.
-        const projection = (map as MlMap).getProjection?.();
-        wedgeProbe.branch = `proj:${projection ? String(projection.type) : 'none'}`;
-        if (projection && projection.type === 'globe') { wedgeProbe.branch = 'globe-skip'; return; }
+        let projectionType: string | undefined;
+        try { projectionType = (map as MlMap).getProjection?.()?.type; } catch { projectionType = undefined; }
+        if (projectionType === 'globe') { wedgeProbe.branch = 'globe-skip'; return; }
         const rgba = hexToRgba01(colorRef.current);
         if (!rgba) { wedgeProbe.branch = 'bad-color'; return; }
-        /* The public Map typing does not expose the transform; the
-           runtime object carries it (the renderer's own sky uniforms
-           are computed from these same fields). */
-        const t = (map as unknown as {
-          transform: {
-            width: number; height: number; rollInRadians?: number;
-            cameraToCenterDistance: number; pitch: number;
-          };
-        }).transform;
+        /* Camera state from public getters and the render arguments
+           only — the Map's transform is not public surface in this
+           MapLibre version (map.transform is undefined at runtime;
+           the first version of this layer read it and threw every
+           frame). cameraToCenterDistance is the transform's own
+           definition: (height / 2) / tan(fov / 2), CSS pixels. */
+        const canvas = gl.canvas as HTMLCanvasElement;
+        const pixelRatio = map.getPixelRatio();
+        const cssWidth = canvas.clientWidth || canvas.width / pixelRatio;
+        const cssHeight = canvas.clientHeight || canvas.height / pixelRatio;
+        const fov = options?.fov && options.fov > 0 ? options.fov : (36.87 * Math.PI) / 180;
+        const t = {
+          width: cssWidth,
+          height: cssHeight,
+          pitch: map.getPitch(),
+          cameraToCenterDistance: (0.5 * cssHeight) / Math.tan(fov / 2),
+        };
         const u = rideWedgeHorizonUniforms({
           width: t.width,
           height: t.height,
-          pixelRatio: map.getPixelRatio(),
-          rollRadians: t.rollInRadians ?? 0,
+          pixelRatio,
+          rollRadians: ((map.getRoll() || 0) * Math.PI) / 180,
           cameraToCenterDistance: t.cameraToCenterDistance,
           pitchDegrees: t.pitch,
         });
