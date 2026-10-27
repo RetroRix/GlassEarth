@@ -21,7 +21,7 @@ import {
 import { routeLineFeatures, type CockpitRouteGeometry } from '@/lib/cockpit-osd';
 import {
   PFD_BAND_HEIGHT_DESKTOP_PX, PFD_BAND_HEIGHT_MOBILE_PX,
-  cockpitRidePadding, satelliteTileUrl,
+  cockpitRidePadding, rideSkySpec, satelliteTileUrl,
 } from '@/lib/cockpit-pfd';
 import { STYLE_EVENT } from '@/lib/style-tokens';
 import { arrivalBeacons } from '@/lib/malware-intel';
@@ -3070,6 +3070,45 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Keep the refs the cockpit loop reads pointed at the latest render.
   useEffect(() => { dataRef.current = data; });
   useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; cockpitRouteRef.current = cockpitRoute; cockpitTargetRef.current = cockpitTarget; cockpitSatFailedRef.current = onCockpitSatelliteFailed; if (!cockpitTarget) probedSatelliteRideRef.current = null; });
+
+  /* ── COCKPIT SKY (lib/cockpit-pfd) ──
+     At the ride's 76° pitch the ground plane runs out before the top
+     of the screen, and what showed beyond it was the basemap style's
+     flat background colour — a white/grey bar over a moving satellite
+     earth. While a ride is on, the map's own sky takes that region
+     instead: an atmospheric gradient painted by the renderer into the
+     same canvas as the ground (so the sensor looks, which filter the
+     canvas, treat the sky like the rest of the world), with the fog
+     blends melting the far ground into the horizon haze. The sky the
+     map already had is captured on the way in and put back verbatim
+     on the way out — the globe's space sky included; setSky with no
+     sky removes one the map never had. Keyed to the theme, not the
+     basemap, so a satellite-failure fallback keeps the same sky. */
+  const rideSkyRestoreRef = useRef<{ captured: boolean; sky: ReturnType<maplibregl.Map['getSky']> | undefined }>({
+    captured: false, sky: undefined,
+  });
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+    const spec = rideSkySpec(!!cockpitTarget, theme);
+    try {
+      if (spec) {
+        if (!rideSkyRestoreRef.current.captured) {
+          let previous: ReturnType<maplibregl.Map['getSky']> | undefined;
+          try { previous = map.getSky(); } catch { previous = undefined; }
+          rideSkyRestoreRef.current = { captured: true, sky: previous };
+        }
+        map.setSky(spec);
+      } else if (rideSkyRestoreRef.current.captured) {
+        const previous = rideSkyRestoreRef.current.sky;
+        rideSkyRestoreRef.current = { captured: false, sky: undefined };
+        /* A captured "no sky" restores by passing none — MapLibre's
+           runtime removes the sky for a missing spec, though its
+           public typing only admits a spec object; hence the cast. */
+        map.setSky(previous as maplibregl.SkySpecification);
+      }
+    } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
+  }, [mapReady, cockpitTarget, theme, projection]);
 
   // ── COCKPIT FOLLOW (lib/cockpit) ──
   // A rAF loop glides the camera along with the ridden aircraft: the

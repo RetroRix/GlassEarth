@@ -10,6 +10,9 @@ import {
   estimateBankDeg,
   formatVerticalSpeed,
   fullscreenTransition,
+  RIDE_SKY_DAY,
+  RIDE_SKY_NIGHT,
+  rideSkySpec,
   satelliteTileUrl,
   tapeAnchorFor,
   tapeStripOffsetPx,
@@ -186,5 +189,56 @@ describe('cruise dim', () => {
     expect(bandDimmed({ ...base, flightHeld: true })).toBe(false);
     expect(bandDimmed({ ...base, lock: 'free' })).toBe(false);
     expect(bandDimmed({ ...base, hasFlight: false })).toBe(false);
+  });
+});
+
+describe('ride sky', () => {
+  const rgb = (hex: string): [number, number, number] => [
+    parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16),
+  ];
+  const luminance = (hex: string): number => {
+    const [r, g, b] = rgb(hex);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  };
+
+  it('no ride, no sky — the map keeps whatever sky it already had', () => {
+    expect(rideSkySpec(false, 'day')).toBeNull();
+    expect(rideSkySpec(false, 'core')).toBeNull();
+    expect(rideSkySpec(false, 'ghost')).toBeNull();
+  });
+
+  it('the DAY theme flies under the day sky, dark themes under the dusk one', () => {
+    expect(rideSkySpec(true, 'day')).toBe(RIDE_SKY_DAY);
+    expect(rideSkySpec(true, 'core')).toBe(RIDE_SKY_NIGHT);
+    expect(rideSkySpec(true, 'ghost')).toBe(RIDE_SKY_NIGHT);
+  });
+
+  it('day sky: a blue zenith melting to a pale haze at the horizon', () => {
+    const [r, g, b] = rgb(RIDE_SKY_DAY['sky-color']);
+    expect(b).toBeGreaterThan(r); // blue-dominant overhead
+    expect(b).toBeGreaterThan(g);
+    // The gradient runs dark-to-light downward: the horizon haze is
+    // far lighter than the zenith, and the fog the ground melts into
+    // sits between them, close to the haze.
+    expect(luminance(RIDE_SKY_DAY['horizon-color'])).toBeGreaterThan(luminance(RIDE_SKY_DAY['sky-color']) + 0.3);
+    expect(luminance(RIDE_SKY_DAY['fog-color'])).toBeGreaterThan(luminance(RIDE_SKY_DAY['sky-color']));
+    expect(luminance(RIDE_SKY_DAY['fog-color'])).toBeLessThanOrEqual(luminance(RIDE_SKY_DAY['horizon-color']));
+  });
+
+  it('night sky: deep indigo overhead, a dimmer dusk glow at the horizon', () => {
+    expect(luminance(RIDE_SKY_NIGHT['sky-color'])).toBeLessThan(0.1);
+    expect(luminance(RIDE_SKY_NIGHT['horizon-color'])).toBeGreaterThan(luminance(RIDE_SKY_NIGHT['sky-color']));
+    expect(luminance(RIDE_SKY_NIGHT['horizon-color'])).toBeLessThan(luminance(RIDE_SKY_DAY['sky-color']));
+    const [r, , b] = rgb(RIDE_SKY_NIGHT['sky-color']);
+    expect(b).toBeGreaterThan(r); // indigo, not black-neutral
+  });
+
+  it('every blend stays inside 0..1 and the horizon actually blends', () => {
+    for (const spec of [RIDE_SKY_DAY, RIDE_SKY_NIGHT]) {
+      for (const key of ['sky-horizon-blend', 'horizon-fog-blend', 'fog-ground-blend'] as const) {
+        expect(spec[key]).toBeGreaterThan(0);
+        expect(spec[key]).toBeLessThanOrEqual(1);
+      }
+    }
   });
 });

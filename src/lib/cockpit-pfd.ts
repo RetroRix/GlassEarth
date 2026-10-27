@@ -182,6 +182,70 @@ export function effectiveRideStyle(
   return riding && !satelliteFailed ? 'satellite' : visitorStyle;
 }
 
+/* ── Ride sky ─────────────────────────────────────────────────────────── */
+
+/**
+ * The sky a ride flies under, in the style-spec shape `map.setSky`
+ * takes. The sky is painted by the map renderer INTO the same WebGL
+ * canvas as the ground — never a DOM backdrop — so the sensor looks
+ * (which filter the canvas element) treat it exactly like the rest of
+ * the world: Night Vision's sky goes phosphor, Thermal's goes hot.
+ */
+export interface RideSkySpec {
+  'sky-color': string;
+  'horizon-color': string;
+  'fog-color': string;
+  'sky-horizon-blend': number;
+  'horizon-fog-blend': number;
+  'fog-ground-blend': number;
+}
+
+/**
+ * Daytime: a real atmospheric gradient — a deeper blue overhead
+ * melting through pale haze at the horizon line. The fog colour sits
+ * a touch deeper than the horizon colour so the far ground keeps a
+ * little body as it melts into the haze; the blends hand the far
+ * ground to the fog and the fog to the sky gradually, so the hard
+ * straight edge where the tiles run out dissolves instead of cutting.
+ */
+export const RIDE_SKY_DAY: RideSkySpec = {
+  'sky-color': '#2e63a8',
+  'horizon-color': '#d9e8f4',
+  'fog-color': '#c8dcee',
+  'sky-horizon-blend': 0.5,
+  'horizon-fog-blend': 0.5,
+  'fog-ground-blend': 0.5,
+};
+
+/**
+ * Night: the same construction after dark — deep indigo overhead,
+ * a dusky blue glow left on the horizon, the ground melting into a
+ * blue-grey murk. Bright enough at the horizon to read as sky rather
+ * than the old near-black space backdrop the globe wears.
+ */
+export const RIDE_SKY_NIGHT: RideSkySpec = {
+  'sky-color': '#0a1122',
+  'horizon-color': '#3d4f73',
+  'fog-color': '#26334e',
+  'sky-horizon-blend': 0.5,
+  'horizon-fog-blend': 0.5,
+  'fog-ground-blend': 0.5,
+};
+
+/**
+ * The sky for a ride under the app's current theme — the DAY theme
+ * flies under the blue sky, every dark theme under the dusk one —
+ * or null when no ride is on, meaning: whatever sky (if any) the map
+ * already had belongs to the map and stays untouched. The sky keys
+ * off the theme, never off the basemap, so when a ride's satellite
+ * imagery fails and the basemap falls back to the visitor's style,
+ * the same sky still sits naturally over it.
+ */
+export function rideSkySpec(riding: boolean, theme: string): RideSkySpec | null {
+  if (!riding) return null;
+  return theme === 'day' ? RIDE_SKY_DAY : RIDE_SKY_NIGHT;
+}
+
 /** The ArcGIS World_Imagery tile URL the satellite layer serves — also
  *  what the ride probes to learn whether the imagery is reachable. */
 export function satelliteTileUrl(lat: number, lng: number, zoom: number): string {
