@@ -682,9 +682,14 @@ export default function Dashboard() {
      so while it is loading or retrying, say so under each of them instead of
      leaving the counts blank — a blank bar reads as "aviation is broken". */
   const [flightsStatus, setFlightsStatus] = useState<FlightFeedStatus>('idle');
+  /* What the maritime AIS collection is doing right now, for its row in the
+     layer panel — set by fetchMaritime below from the route's own status
+     block, so the panel never claims more than the feed delivered. */
+  const [maritimeStatus, setMaritimeStatus] = useState<string | null>(null);
   const layerLiveStatus = useMemo(() => {
     const status: Record<string, string> = {};
     if (transitStatus) status.transit = transitStatus.text;
+    if (maritimeStatus) status.maritime = maritimeStatus;
     if (flightsStatus === 'loading') {
       status.flights = 'Loading flights…';
       status.private = 'Loading flights…';
@@ -697,8 +702,12 @@ export default function Dashboard() {
       status.military = 'Flights unavailable — retrying';
     }
     return Object.keys(status).length ? status : undefined;
-  }, [transitStatus, flightsStatus]);
+  }, [transitStatus, flightsStatus, maritimeStatus]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
+  /* The viewport bounds as a ref: the maritime poll reads them on its own
+     cadence, long after the render that produced them. */
+  const mapBoundsRef = useRef<{ west: number; south: number; east: number; north: number } | null>(null);
+  useEffect(() => { mapBoundsRef.current = mapCenter?.bounds ?? null; }, [mapCenter]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'remote'|'oi'|'tv'|null>(null);
 
@@ -1643,6 +1652,31 @@ export default function Dashboard() {
     }
   }, []);
 
+  /* Maritime fetch, viewport-aware: the current bounds ride along so the
+     route can gather AISStream traffic for the area on screen (it answers
+     for the rounded-degree cell, cached server-side for 90 s). The route's
+     own aisstream status block drives the layer-panel status line — while
+     a new area is being gathered the row says so; when the feed errors it
+     says the map is Baltic-only rather than going quiet. */
+  const maritimeCellRef = useRef<string>('');
+  const fetchMaritime = useCallback(() => {
+    const b = mapBoundsRef.current;
+    const url = b ? `/api/maritime?bbox=${b.west},${b.south},${b.east},${b.north}` : '/api/maritime';
+    const cell = b ? [b.west, b.south, b.east, b.north].map(n => Math.round(n)).join(',') : '';
+    if (b && cell !== maritimeCellRef.current) setMaritimeStatus('Gathering live AIS for this area…');
+    return fetchEndpoint(url, d => {
+      maritimeCellRef.current = cell;
+      const ais = d.aisstream;
+      if (ais?.status === 'error') setMaritimeStatus('AISStream unavailable — Baltic AIS only');
+      else if (ais?.status === 'empty') setMaritimeStatus('No AISStream traffic reported in this area');
+      else if (ais?.status === 'ok' || ais?.status === 'not-configured') setMaritimeStatus(null);
+      return { maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships };
+    }).then(ok => {
+      if (!ok) setMaritimeStatus('Maritime feed unavailable — retrying');
+      return ok;
+    });
+  }, [fetchEndpoint]);
+
   // ── PROGRESSIVE DATA LOADING (request-optimized) ──
   useEffect(() => {
     // Priority 1: Core feeds (always needed for panels)
@@ -1806,7 +1840,7 @@ export default function Dashboard() {
     }
     // Maritime
     if (activeLayers.maritime && !layerFetchedRef.current.has('maritime')) {
-      fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
+      fetchMaritime();
       layerFetchedRef.current.add('maritime');
     }
     // Balloons
@@ -1927,7 +1961,7 @@ export default function Dashboard() {
       const vesselGapMs = () => ((dataRef.current.maritime_ships?.length ?? 0) > 0 ? 10_000 : 300_000);
       const pollMaritime = () => {
         if (stopped) return;
-        fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
+        fetchMaritime();
         vesselTimer = setTimeout(pollMaritime, vesselGapMs());
       };
       vesselTimer = setTimeout(pollMaritime, vesselGapMs());
@@ -1941,7 +1975,7 @@ export default function Dashboard() {
       }, 300000)); // 5m — a blocklist turns over in hours, not seconds
     }
     return () => { intervals.forEach(clearInterval); stopFns.forEach(stop => stop()); };
-  }, [activeLayers, fetchEndpoint]);
+  }, [activeLayers, fetchEndpoint, fetchMaritime]);
 
   // The standing flights poll is five minutes — far too stale to ride on.
   // While a ride is on, refresh the feed every 30 s (the route serves its

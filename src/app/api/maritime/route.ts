@@ -1,10 +1,16 @@
-import { NextResponse } from 'next/server';
-import WebSocket from 'ws';
+import { NextResponse, type NextRequest } from 'next/server';
+import {
+  bboxCellKey,
+  clampBboxSpan,
+  collectAisstreamSnapshot,
+  parseBboxParam,
+} from '@/lib/aisstream';
 
 /**
  * OSIRIS — Maritime Intelligence
  * Real-time AIS vessel tracking via Digitraffic (keyless, Baltic) and
- * aisstream.io (when AIS_API_KEY is configured) + static global ports.
+ * aisstream.io (viewport-scoped snapshot collection when
+ * AISSTREAM_API_KEY is configured) + static global ports.
  */
 
 const PORTS = [
@@ -80,135 +86,88 @@ const CHOKEPOINTS = [
   { name: 'Lombok Strait', lat: -8.47, lng: 115.72, traffic: 'Alt Malacca', risk: 'LOW' },
 ];
 
-// --- Global AIS Stream Client (In-Memory Cache) ---
-// Note: In a true serverless environment, this state would reset per invocation.
-// For Next.js dev server or Node.js Docker container, this will persist.
+/* ── AISStream (aisstream.io) — global terrestrial AIS ────────────────────
+   The free feed is a WebSocket stream, but a Vercel function cannot hold a
+   socket open between requests — the previous design (one permanent
+   connection feeding an in-memory cache) only ever worked on a long-lived
+   dev server, so on serverless the aisstream half of this route was dead
+   code and total_ships meant "the Baltic". The honest serverless pattern
+   is viewport-scoped snapshot collection: when a request carries the
+   client's bbox, the route opens the socket server-side, gathers that
+   area's traffic for a few seconds, closes, and merges the snapshot into
+   the same ship store Digitraffic feeds. Per rounded-degree cell the
+   result is reused for AISSTREAM_CELL_TTL_MS, so panning around one port
+   costs one collection, not one per poll. Collected vessels accumulate on
+   the warm instance, which is also how the ShipStaticData join (name /
+   type / destination, broadcast minutes apart) ever completes.
+
+   The key is read ONLY from AISSTREAM_API_KEY, server-side. Without it the
+   layer keeps working from Digitraffic alone and the payload says so.
+   Coverage honesty: this is terrestrial AIS — coasts and shipping lanes,
+   sparse mid-ocean, and the free tier's flow varies by region (the
+   Singapore Strait trickled while Rotterdam poured, 2026-10-27). */
+
+const AISSTREAM_COLLECT_MS = 4_000;
+const AISSTREAM_CELL_TTL_MS = 90_000;
 
 const globalForAis = globalThis as unknown as {
   shipsCache: Map<number, any>;
-  isAisConnecting: boolean;
 };
 
 if (!globalForAis.shipsCache) {
   globalForAis.shipsCache = new Map();
-  globalForAis.isAisConnecting = false;
 }
 
 const shipsCache = globalForAis.shipsCache;
 
-function connectAisStream() {
-  if (globalForAis.isAisConnecting) return;
-  const apiKey = process.env.AIS_API_KEY;
-  if (!apiKey) return;
+const globalForAisstream = globalThis as unknown as {
+  aisstreamCells?: Map<string, { at: number; status: string; vessels: number }>;
+  aisstreamInflight?: Map<string, Promise<void>>;
+  aisstreamMeta?: { status: string; at: number; vessels: number };
+};
 
-  globalForAis.isAisConnecting = true;
-  let ws: WebSocket;
+async function ensureAisstream(bboxRaw: string | null): Promise<void> {
+  // Tests drive the ship maps directly (see route.test.ts): a real socket
+  // here would leak live vessels into hermetic cases.
+  if (process.env.NODE_ENV === 'test') return;
+  if (!bboxRaw) return;
+  const parsed = parseBboxParam(bboxRaw);
+  if (!parsed) return;
 
-  try {
-    ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
-  } catch (e) {
-    globalForAis.isAisConnecting = false;
+  if (!globalForAisstream.aisstreamCells) globalForAisstream.aisstreamCells = new Map();
+  if (!globalForAisstream.aisstreamInflight) globalForAisstream.aisstreamInflight = new Map();
+
+  const apiKey = process.env.AISSTREAM_API_KEY;
+  if (!apiKey) {
+    globalForAisstream.aisstreamMeta = { status: 'not-configured', at: Date.now(), vessels: 0 };
     return;
   }
 
-  ws.on("open", () => {
-    globalForAis.isAisConnecting = false;
-    const subscriptionMessage = {
-      APIKey: apiKey,
-      // Target specific high-value SCM areas to ensure data delivery on free tier
-      BoundingBoxes: [
-        // Tokyo Bay
-        [[34.8, 139.5], [35.7, 140.2]],
-        // Hormuz
-        [[25.0, 54.0], [27.5, 57.5]],
-        // Suez Canal
-        [[27.0, 32.0], [32.0, 33.5]],
-        // Bab el-Mandeb
-        [[12.0, 42.5], [14.0, 44.0]],
-        // Panama Canal
-        [[8.0, -80.5], [10.0, -79.0]],
-        // Malacca / Singapore
-        [[1.0, 103.0], [3.0, 104.5]],
-        // Taiwan Strait
-        [[22.0, 118.0], [26.0, 121.0]],
-        // Rotterdam / English Channel
-        [[50.0, 0.0], [53.0, 5.0]],
-        // US West Coast (LA/LB)
-        [[33.0, -119.0], [34.5, -117.0]],
-        // Global fallback (often heavily sampled by aisstream)
-        [[-90, -180], [90, 180]]
-      ],
-      FilterMessageTypes: ["PositionReport", "ShipStaticData"]
-    };
-    ws.send(JSON.stringify(subscriptionMessage));
-  });
+  const bbox = clampBboxSpan(parsed);
+  const cellKey = bboxCellKey(bbox);
+  const cell = globalForAisstream.aisstreamCells.get(cellKey);
+  if (cell && Date.now() - cell.at < AISSTREAM_CELL_TTL_MS) return;
+  const inflight = globalForAisstream.aisstreamInflight.get(cellKey);
+  if (inflight) return inflight;
 
-  // Map AIS ship types to OSIRIS categories
-  const getOsirisShipType = (typeCode: number) => {
-    if (!typeCode) return 'cargo';
-    if (typeCode >= 80 && typeCode <= 89) return 'tanker';
-    if (typeCode >= 70 && typeCode <= 79) return 'cargo';
-    if (typeCode === 35) return 'military';
-    return 'cargo';
-  };
-
-  ws.on("message", (data) => {
+  const run = (async () => {
     try {
-      const parsed = JSON.parse(data.toString());
-      const mmsi = parsed.MetaData?.MMSI;
-      if (!mmsi) return;
-
-      const existing = shipsCache.get(mmsi) || {
-        id: mmsi, mmsi: mmsi, timestamp: Date.now()
-      };
-
-      // Extract Name from MetaData if available (present in most messages)
-      if (parsed.MetaData?.ShipName) {
-        existing.name = parsed.MetaData.ShipName.trim();
-      }
-
-      if (parsed.MessageType === "PositionReport" && parsed.Message?.PositionReport) {
-        const report = parsed.Message.PositionReport;
-        existing.lat = report.Latitude;
-        existing.lng = report.Longitude;
-        existing.speed = report.Sog;
-        existing.heading = report.TrueHeading || report.Cog;
-        existing.timestamp = Date.now();
-      } 
-      else if (parsed.MessageType === "ShipStaticData" && parsed.Message?.ShipStaticData) {
-        const staticData = parsed.Message.ShipStaticData;
-        existing.name = staticData.Name ? staticData.Name.trim() : existing.name;
-        existing.destination = staticData.Destination ? staticData.Destination.trim() : existing.destination;
-        existing.type = getOsirisShipType(staticData.Type);
-      }
-
-      // Only store if we have coordinates
-      if (existing.lat && existing.lng) {
-        shipsCache.set(mmsi, existing);
-      }
-
-      // Limit cache size to prevent memory leak (allow up to 20,000 ships)
-      if (shipsCache.size > 20000) {
-        const firstKey = shipsCache.keys().next().value;
-        if (firstKey) shipsCache.delete(firstKey);
-      }
+      const result = await collectAisstreamSnapshot({ apiKey, bbox, collectMs: AISSTREAM_COLLECT_MS });
+      for (const v of result.vessels) shipsCache.set(v.mmsi, v);
+      globalForAisstream.aisstreamCells!.set(cellKey, { at: Date.now(), status: result.status, vessels: result.vessels.length });
+      globalForAisstream.aisstreamMeta = { status: result.status, at: Date.now(), vessels: result.vessels.length };
+      if (result.vessels.length) clearMaritimeSnapshot();
     } catch (e) {
-      // ignore parse errors
+      console.warn('[OSIRIS] AISStream collection failed:', e);
+      globalForAisstream.aisstreamCells!.set(cellKey, { at: Date.now(), status: 'error', vessels: 0 });
+      globalForAisstream.aisstreamMeta = { status: 'error', at: Date.now(), vessels: 0 };
+    } finally {
+      globalForAisstream.aisstreamInflight!.delete(cellKey);
     }
-  });
-
-  ws.on("close", () => {
-    globalForAis.isAisConnecting = false;
-    setTimeout(connectAisStream, 5000); // Reconnect
-  });
-
-  ws.on("error", () => {
-    ws.close();
-  });
+  })();
+  globalForAisstream.aisstreamInflight.set(cellKey, run);
+  return run;
 }
-
-// Start connection process asynchronously
-connectAisStream();
 
 // --- SCM Integration: VesselAPI Hybrid Fallback (Satellite AIS) ---
 let lastVesselApiFetch = 0;
@@ -412,11 +371,27 @@ function buildSnapshot(now: number): string {
     };
   });
 
+  const aisMeta = globalForAisstream.aisstreamMeta;
+  const aisConfigured = !!process.env.AISSTREAM_API_KEY;
+
   return JSON.stringify({
     ports: dynamicPorts,
     chokepoints: dynamicChokepoints,
     ships: ships,
     ship_sources: shipSources,
+    /* AISStream collection state, stated plainly so the client (and anyone
+       reading the payload) can tell a working global feed from a Baltic-only
+       one: without a key, or when the feed errors, the ships above are
+       Digitraffic's and this block says so. */
+    aisstream: {
+      configured: aisConfigured,
+      status: !aisConfigured ? 'not-configured' : (aisMeta?.status ?? 'idle'),
+      as_of: aisMeta?.at ? new Date(aisMeta.at).toISOString() : null,
+      vessels: shipSources.aisstream,
+      collect_window_ms: AISSTREAM_COLLECT_MS,
+      cell_ttl_ms: AISSTREAM_CELL_TTL_MS,
+      coverage: 'Terrestrial AIS via AISStream — coastal and shipping-lane density; sparse mid-ocean. Not satellite AIS.',
+    },
     total_ports: dynamicPorts.length,
     total_chokepoints: dynamicChokepoints.length,
     total_ships: ships.length,
@@ -429,11 +404,16 @@ export function clearMaritimeSnapshot(): void {
   delete globalForSnapshot.maritimeSnapshot;
 }
 
-export async function GET() {
+export async function GET(request?: NextRequest) {
   // Trigger Hybrid Fallback
   await fetchVesselApiFallback();
   // Keyless live AIS (Baltic) — the layer's baseline live source.
   await ensureDigitraffic();
+  // Global terrestrial AIS for the caller's viewport, when a bbox is given
+  // and the key is configured. Awaited, so the response that asked for a
+  // new area usually already carries its ships.
+  const bboxRaw = request?.url ? new URL(request.url).searchParams.get('bbox') : null;
+  await ensureAisstream(bboxRaw);
 
   const now = Date.now();
   const cached = globalForSnapshot.maritimeSnapshot;

@@ -1748,7 +1748,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const showShipPopup = (p: any, coords: any) => {
       const color = p.type === 'military' ? '#FF1744' : p.type === 'tanker' ? '#FF9500' : '#00E5FF';
       const icon = p.type === 'military' ? '⚔️' : p.type === 'tanker' ? '🛢️' : '🚢';
-      
+      /* AIS positions age in silence — a vessel that last reported 9 minutes
+         ago must not read as live as one that reported 20 seconds ago. The
+         report age and the feed it came from ride under the destination. */
+      const ageMs = p.timestamp ? Date.now() - Number(p.timestamp) : NaN;
+      const reported = !Number.isFinite(ageMs) || ageMs < 0 ? '—'
+        : ageMs < 60_000 ? `${Math.max(1, Math.round(ageMs / 1000))}S AGO`
+        : ageMs < 3_600_000 ? `${Math.round(ageMs / 60_000)} MIN AGO`
+        : `${(ageMs / 3_600_000).toFixed(1)}H AGO`;
+      const sourceLabel = p.source === 'aisstream' ? 'AISSTREAM' : p.source === 'digitraffic' ? 'BALTIC · DIGITRAFFIC' : 'AIS';
+
       popup(coords, `<div style="${pStyle}border:1px solid ${color}60;box-shadow:inset 0 0 12px ${color}15;">
         <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid ${color}40;padding-bottom:6px;margin-bottom:8px;">
           <div style="color:${color};font-size:12px;font-weight:700;letter-spacing:0.1em;">${icon} [ ${(p.type||'VESSEL').toUpperCase()} ]</div>
@@ -1762,6 +1771,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <div><span style="color:#5C5A54;">LONGITUDE</span><br/><span style="color:#E8E6E0;font-family:monospace;">${coords[0].toFixed(4)}°</span></div>
         </div>
         <div><span style="color:#5C5A54;font-size:9px;">DESTINATION: </span><span style="color:#E8E6E0;font-size:9px;">${p.destination || 'UNKNOWN'}</span></div>
+        <div style="margin-top:2px;"><span style="color:#5C5A54;font-size:9px;">REPORTED: </span><span style="color:#E8E6E0;font-size:9px;">${reported}</span><span style="color:#5C5A54;font-size:9px;"> · SOURCE: </span><span style="color:#E8E6E0;font-size:9px;">${sourceLabel}</span></div>
         <button onclick="window.osirisShareShip && window.osirisShareShip({ mmsi: '${idSafe(p.mmsi||'')}', name: '${jsStr(p.name || '')}', lat: ${coords[1]}, lng: ${coords[0]} })" style="width:100%;margin-top:8px;padding:6px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.20);color:#B0BEC5;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">SHARE THIS SHIP</button>
         <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${p.mmsi}" target="_blank" style="${linkStyle}flex:1;text-align:center;color:${color};border:1px solid ${color}40;background:${color}15;display:inline-block;width:100%;box-sizing:border-box;margin-top:4px;">[ OPEN SOURCE ↗ ]</a>
       </div>`);
@@ -2069,7 +2079,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         if (s) {
           shareFocusHandledRef.current = shareFocus.ts;
           openers.ship(
-            { name: s.name || String(s.mmsi), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, mmsi: s.mmsi },
+            { name: s.name || String(s.mmsi), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, mmsi: s.mmsi, timestamp: s.timestamp, source: s.source },
             [s.lng, s.lat],
           );
         }
@@ -2444,7 +2454,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
-    setGeo('maritime-ships', activeLayers.maritime && data.maritime_ships ? data.maritime_ships.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, mmsi: s.mmsi } })) : []);
+    setGeo('maritime-ships', activeLayers.maritime && data.maritime_ships ? data.maritime_ships.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, mmsi: s.mmsi, timestamp: s.timestamp, source: s.source } })) : []);
   }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, setGeo]);
 
   useEffect(() => {
