@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useReducer, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, Dices, Home, ArrowLeft, Pin, PinOff } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, AudioLines, Dices, Home, ArrowLeft, Pin, PinOff } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
@@ -48,6 +48,7 @@ import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
 import StationsPanel from '@/components/StationsPanel';
 import LaunchesPanel from '@/components/LaunchesPanel';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
+import RadioTuner from '@/components/RadioTuner';
 import { loadTvFavorites, type RadioStation, type TvChannel } from '@/lib/stations';
 const TvWall = dynamic(() => import('@/components/TvWall'), { ssr: false });
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
@@ -279,6 +280,10 @@ export default function Dashboard() {
   const [showTvWall, setShowTvWall] = useState(false);
   const [tvWallSeed, setTvWallSeed] = useState<{ channels: TvChannel[]; favorites: TvChannel[] }>({ channels: [], favorites: [] });
   const [radioStation, setRadioStation] = useState<RadioStation | null>(null);
+  const [showTuner, setShowTuner] = useState(false);
+  /* Dead-stream reports from the one playback owner — the Radio Tuner
+     listens and auto-skips; nothing else consumes this. */
+  const [radioFailure, setRadioFailure] = useState<{ uuid: string; at: number } | null>(null);
   const [showSpotting, setShowSpotting] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showDrawing, setShowDrawing] = useState(false);
@@ -659,7 +664,7 @@ export default function Dashboard() {
   } = useHideableBar('right', {
     riding: cockpitState.status === 'riding',
     panelOpen:
-      showSpaceCam || showWall || showTv || showTvWall || showStations ||
+      showSpaceCam || showWall || showTv || showTvWall || showStations || showTuner ||
       showSpotting || showMarkets || showAlerts || showOi || showDrawing ||
       showDirections || showDesktopSearch || showArcGIS || showRemote ||
       shareOpen,
@@ -2600,10 +2605,17 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
-          <button onClick={() => { setShowStations(!showStations); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowSpotting(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showStations ? 'bg-[#00E5FF]/20' : 'hover:bg-white/10'}`} title="Stations — live TV channels and internet radio from open directories" aria-label="Stations" aria-expanded={showStations}>
+          <button onClick={() => { setShowStations(!showStations); setShowTuner(false); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowSpotting(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showStations ? 'bg-[#00E5FF]/20' : 'hover:bg-white/10'}`} title="Stations — live TV channels and internet radio from open directories" aria-label="Stations" aria-expanded={showStations}>
             <RadioTower className={`w-4 h-4 ${showStations ? 'text-[#00E5FF]' : 'text-white/60'}`} />
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">STATIONS</span>
+        </div>
+
+        <div className="relative group">
+          <button onClick={() => { setShowTuner(!showTuner); setShowStations(false); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowSpotting(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showTuner ? 'bg-[#00E5FF]/20' : 'hover:bg-white/10'}`} title="Radio Tuner — drag the dial around the planet, the globe flies to the broadcaster" aria-label="Radio Tuner" aria-expanded={showTuner}>
+            <AudioLines className={`w-4 h-4 ${showTuner ? 'text-[#00E5FF]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">RADIO TUNER</span>
         </div>
 
         <div className="relative group">
@@ -3018,6 +3030,16 @@ export default function Dashboard() {
                         </span>
                       </button>
                       <button
+                        onClick={() => { setMobilePanel(null); setShowTuner(true); }}
+                        className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+                      >
+                        <AudioLines className="h-4 w-4 shrink-0 text-[#00E5FF]" />
+                        <span>
+                          <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">Radio Tuner</span>
+                          <span className="block font-mono text-[8px] uppercase tracking-wider text-[var(--text-muted)]">Drag the dial around the planet — the globe flies to the broadcaster</span>
+                        </span>
+                      </button>
+                      <button
                         onClick={() => { setMobilePanel(null); setTvWallSeed({ channels: [], favorites: loadTvFavorites() }); setShowTvWall(true); }}
                         className="flex w-full items-center gap-3 border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
                       >
@@ -3227,9 +3249,24 @@ export default function Dashboard() {
         />
       )}
 
+      {/* ── Radio Tuner — analog dial on the same catalogue + playback owner ── */}
+      {showTuner && (
+        <RadioTuner
+          onClose={() => setShowTuner(false)}
+          onPlayRadio={(station) => setRadioStation(station)}
+          onFlyTo={(lat, lng, zoom, duration) => setFlyToLocation({ lat, lng, zoom, duration, ts: Date.now() })}
+          currentRadioUuid={radioStation?.uuid ?? null}
+          failureSignal={radioFailure}
+        />
+      )}
+
       {/* ── Radio now-playing bar — page-level so it survives the panel ── */}
       {radioStation && (
-        <RadioNowPlaying station={radioStation} onStop={() => setRadioStation(null)} />
+        <RadioNowPlaying
+          station={radioStation}
+          onStop={() => setRadioStation(null)}
+          onFailed={(s) => setRadioFailure({ uuid: s.uuid, at: Date.now() })}
+        />
       )}
 
       {/* ── Plane Spotting panel ── */}

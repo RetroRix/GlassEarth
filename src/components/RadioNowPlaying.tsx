@@ -17,9 +17,12 @@ import { isMixedContent, type RadioStation } from '@/lib/stations';
 interface RadioNowPlayingProps {
   station: RadioStation;
   onStop: () => void;
+  /** Fired once per station when its stream proves unplayable (error or
+      http-blocked). The Radio Tuner listens to auto-skip dead stops. */
+  onFailed?: (station: RadioStation) => void;
 }
 
-export default function RadioNowPlaying({ station, onStop }: RadioNowPlayingProps) {
+export default function RadioNowPlaying({ station, onStop, onFailed }: RadioNowPlayingProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(0.8);
@@ -38,6 +41,16 @@ export default function RadioNowPlaying({ station, onStop }: RadioNowPlayingProp
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
+
+  /* Report a dead stream exactly once per station — the keyed element
+     remounts per station, so this ref is per-station by construction. */
+  const failedNotifiedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if ((failed || blocked) && failedNotifiedRef.current !== station.uuid) {
+      failedNotifiedRef.current = station.uuid;
+      onFailed?.(station);
+    }
+  }, [failed, blocked, station, onFailed]);
 
   const toggle = () => {
     const el = audioRef.current;

@@ -97,6 +97,12 @@ export async function GET(req: NextRequest) {
     case 'search':
       path = `stations/search?name=${encodeURIComponent(q)}&${common}&order=votes&reverse=true&limit=${limit}`;
       break;
+    case 'tuner':
+      /* The Radio Tuner dial needs the widest coordinate-bearing pool the
+         directory offers: the top-voted 6,000 (the geo filter below cuts
+         it to the stations that actually carry coordinates). */
+      path = `stations/topvote/6000?${common}`;
+      break;
     case 'top':
     default:
       path = `stations/topvote/${limit}?${common}`;
@@ -104,7 +110,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const stations = normalizeRadioStations(await radioFetch(path));
+    const all = normalizeRadioStations(await radioFetch(path));
+    /* The dial is coordinate-bearing stations only; the panel modes keep
+       the full slice (coordinate-less stations stay panel-playable). */
+    const stations = mode === 'tuner'
+      ? all.filter(s => s.lat !== undefined && s.lng !== undefined)
+      : all;
     return NextResponse.json(
       { stations, total: stations.length, mode, source: 'Radio Browser', timestamp: new Date().toISOString() },
       { headers: CACHE_HEADERS },

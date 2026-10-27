@@ -178,6 +178,11 @@ export interface RadioStation {
   favicon: string;
   url: string;
   votes: number;
+  /** Broadcaster coordinates from Radio Browser (geo_lat / geo_long) when
+      the catalogue carries them — many stations have none. Powers the
+      Radio Tuner dial (lib/radio-tuner); absent means panel-only. */
+  lat?: number;
+  lng?: number;
 }
 
 /** Radio Browser's raw station shape — only the fields we read. */
@@ -194,12 +199,21 @@ interface RadioBrowserStation {
   url_resolved?: string;
   url?: string;
   votes?: number;
+  geo_lat?: number | null;
+  geo_long?: number | null;
 }
 
 /** Normalize one Radio Browser record; null when it has nothing playable. */
 export function normalizeRadioStation(raw: RadioBrowserStation): RadioStation | null {
   const url = (raw.url_resolved || raw.url || '').trim();
   if (!url || !raw.stationuuid) return null;
+  /* Coordinates ride along only when both are real, in-range numbers —
+     Radio Browser serves null for the many stations that never gave it
+     any, and garbage pairs must not put a station in the ocean. */
+  const lat = typeof raw.geo_lat === 'number' && Number.isFinite(raw.geo_lat) && Math.abs(raw.geo_lat) <= 90
+    ? raw.geo_lat : undefined;
+  const lng = typeof raw.geo_long === 'number' && Number.isFinite(raw.geo_long) && Math.abs(raw.geo_long) <= 180
+    ? raw.geo_long : undefined;
   return {
     uuid: raw.stationuuid,
     name: (raw.name || 'Unknown station').trim(),
@@ -213,6 +227,7 @@ export function normalizeRadioStation(raw: RadioBrowserStation): RadioStation | 
     favicon: raw.favicon ?? '',
     url,
     votes: raw.votes ?? 0,
+    ...(lat !== undefined && lng !== undefined ? { lat, lng } : {}),
   };
 }
 
