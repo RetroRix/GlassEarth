@@ -89,8 +89,12 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
   const probe = useRef(cachedProbe(headProbe()));
   const runId = useRef(0);
   const splitRef = useRef(split);
+  const projectionRef = useRef(projection);
+  projectionRef.current = projection;
   const overlayRef = useRef<MlMap | null>(null);
   const overlayDivRef = useRef<HTMLDivElement | null>(null);
+  const overlayProjRef = useRef<() => void>(() => {});
+  const [overlayFailed, setOverlayFailed] = useState(false);
   const dividerRef = useRef<HTMLDivElement | null>(null);
   const chipARef = useRef<HTMLDivElement | null>(null);
   const chipBRef = useRef<HTMLDivElement | null>(null);
@@ -101,15 +105,6 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
   useEffect(() => {
     try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch { /* storage blocked */ }
   }, [settings]);
-
-  // TEMP BEACON — removed after the mount investigation.
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[DC-BEACON] mounted');
-    return () => { // eslint-disable-next-line no-console
-      console.log('[DC-BEACON] UNMOUNTED');
-    };
-  }, []);
 
   // The calendar: the newest dates GIBS actually publishes.
   useEffect(() => {
@@ -147,22 +142,44 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     parent.appendChild(div);
     overlayDivRef.current = div;
 
-    const overlay = new maplibregl.Map({
-      container: div,
-      style: {
-        version: 8,
-        sources: {},
-        layers: [{ id: 'dc-b-back', type: 'background', paint: { 'background-color': BACK } }],
-      },
-      interactive: false,
-      attributionControl: false,
-      fadeDuration: 0,
-      canvasContextAttributes: { antialias: false },
-    });
-    // eslint-disable-next-line no-console
-    console.log('[DC-BEACON] overlay map constructed');
+    let overlay: MlMap;
+    try {
+      overlay = new maplibregl.Map({
+        container: div,
+        style: {
+          version: 8,
+          sources: {},
+          layers: [{ id: 'dc-b-back', type: 'background', paint: { 'background-color': BACK } }],
+        },
+        interactive: false,
+        attributionControl: false,
+        fadeDuration: 0,
+        canvasContextAttributes: { antialias: false },
+      });
+    } catch (e) {
+      // A second WebGL context can be refused on a struggling GPU. The
+      // comparison then degrades to side A alone — it must never take
+      // the visitor's map down with it.
+      console.warn('[OSIRIS] Date compare overlay unavailable:', e instanceof Error ? e.message : e);
+      div.remove();
+      overlayDivRef.current = null;
+      setOverlayFailed(true);
+      return;
+    }
     overlayRef.current = overlay;
-    applyMapProjection(overlay, projection);
+    /* setProjection on a style that has not finished loading THROWS
+       ("Style is not done loading") — and an effect that throws takes
+       the whole map down through the page's error boundary (found in
+       live verification: toggling compare on replaced the map with the
+       error box). So the projection is applied only once the overlay's
+       style reports itself loaded, retried on its load event, and every
+       application is guarded. */
+    const applyProj = () => {
+      try { if (overlay.isStyleLoaded()) applyMapProjection(overlay, projectionRef.current); } catch { /* retried on load */ }
+    };
+    overlayProjRef.current = applyProj;
+    overlay.once('load', applyProj);
+    applyProj();
     const sync = () => overlay.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
     sync();
     map.on('move', sync);
@@ -179,13 +196,15 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
       div.remove();
       overlayRef.current = null;
       overlayDivRef.current = null;
+      overlayProjRef.current = () => {};
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapRef]);
 
-  // Follow the main map's projection if the visitor flips it mid-compare.
+  // Follow the main map's projection if the visitor flips it mid-compare
+  // (through the same load-guarded path as the first application).
   useEffect(() => {
-    if (overlayRef.current) applyMapProjection(overlayRef.current, projection);
+    overlayProjRef.current();
   }, [projection]);
 
   // Clip follows the split (state for the panel slider, ref for drags).
@@ -305,7 +324,7 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
   /* ── The divider ──────────────────────────────────────────────────── */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || overlayFailed) return;
     const parent = map.getContainer().parentElement;
     if (!parent) return;
     const el = document.createElement('div');
@@ -364,7 +383,7 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
       chipBRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapRef]);
+  }, [mapRef, overlayFailed]);
 
   /* ── Date chips riding the top of the divider ─────────────────────── */
   const chip = (side: Side | null, letter: string) => {
@@ -460,6 +479,11 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
                 className="flex items-center gap-1 text-[var(--gold-light)] hover:text-white">
                 <ZoomIn className="w-3 h-3" strokeWidth={1.7} /> GO
               </button>
+            </div>
+          )}
+          {overlayFailed && (
+            <div className="text-[9px] tracking-[0.14em] text-amber-200/80">
+              SIDE B UNAVAILABLE ON THIS DEVICE — SHOWING SIDE A FULL-WIDTH
             </div>
           )}
           <div className="text-[8.5px] tracking-[0.14em] text-white/30">
