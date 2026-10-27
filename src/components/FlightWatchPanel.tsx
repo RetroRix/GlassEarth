@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Plane, Gauge, ArrowUp, Radio, Crosshair, Loader2, Navigation } from 'lucide-react';
+import { X, Plane, Gauge, ArrowUp, Radio, Crosshair, Loader2, Navigation, Share2, Check } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
    OSIRIS — Flight Watch
@@ -158,6 +158,8 @@ interface FlightWatchPanelProps {
   onDetail: (icao24: string, detail: AircraftDetail | null) => void;
   /** Ride along with this aircraft in the cockpit view. */
   onRide?: (flight: WatchedFlight) => void;
+  /** Copy a link that re-opens the app on this aircraft (lib/share-view targets). */
+  onShare?: (flight: WatchedFlight, telem?: FlightTelemetry) => void;
 }
 
 /** Feet is what aviation actually uses; the feed reports metres. */
@@ -171,16 +173,18 @@ export function formatAlt(metres: number | null | undefined, grounded?: boolean)
   return `${toFeet(metres).toLocaleString()} ft`;
 }
 
-function Row({ flight, telem, onRemove, onLocate, onDetail, onRide }: {
+function Row({ flight, telem, onRemove, onLocate, onDetail, onRide, onShare }: {
   flight: WatchedFlight;
   telem?: FlightTelemetry;
   onRemove: (icao24: string) => void;
   onLocate: (lat: number, lng: number) => void;
   onDetail: (icao24: string, d: AircraftDetail | null) => void;
   onRide?: (flight: WatchedFlight) => void;
+  onShare?: (flight: WatchedFlight, telem?: FlightTelemetry) => void;
 }) {
   const [detail, setDetail] = useState<AircraftDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [shared, setShared] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -227,6 +231,20 @@ function Row({ flight, telem, onRemove, onLocate, onDetail, onRide }: {
             className="p-0.5 text-[var(--text-muted)] hover:text-[var(--cyan-primary)] transition-colors"
           >
             <Crosshair className="w-3 h-3" />
+          </button>
+        )}
+        {onShare && (
+          <button
+            onClick={() => {
+              onShare(flight, telem);
+              setShared(true);
+              setTimeout(() => setShared(false), 2000);
+            }}
+            title="Copy a link that re-opens this flight"
+            aria-label={`Copy a share link for ${flight.callsign || flight.icao24}`}
+            className="p-0.5 text-[var(--text-muted)] hover:text-[var(--cyan-primary)] transition-colors"
+          >
+            {shared ? <Check className="w-3 h-3 text-[var(--alert-green)]" /> : <Share2 className="w-3 h-3" />}
           </button>
         )}
         {onRide && (
@@ -321,7 +339,7 @@ function Row({ flight, telem, onRemove, onLocate, onDetail, onRide }: {
 }
 
 export default function FlightWatchPanel({
-  watched, telemetry, onRemove, onLocate, onDetail, onRide,
+  watched, telemetry, onRemove, onLocate, onDetail, onRide, onShare,
 }: FlightWatchPanelProps) {
   if (watched.length === 0) return null;
 
@@ -336,6 +354,7 @@ export default function FlightWatchPanel({
           onLocate={onLocate}
           onDetail={onDetail}
           onRide={onRide}
+          onShare={onShare}
         />
       ))}
     </div>

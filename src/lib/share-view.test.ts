@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildShareUrl, decodeShareView, encodeShareParams } from './share-view';
+import { buildShareUrl, decodeShareTarget, decodeShareView, encodeShareParams } from './share-view';
 
 describe('share view round-trip', () => {
   it('carries centre, zoom, bearing, pitch and camera through encode → decode', () => {
@@ -66,5 +66,54 @@ describe('share view decoding defences', () => {
   it('accepts the boundary coordinates themselves', () => {
     expect(decodeShareView('lat=-90&lon=180')).toEqual({ lat: -90, lng: 180 });
     expect(decodeShareView('lat=90&lon=-180')).toEqual({ lat: 90, lng: -180 });
+  });
+});
+
+describe('share targets (wave item 10)', () => {
+  it('carries a flight target through encode → decode, hex normalised to lowercase', () => {
+    const view = { lat: 38.28, lng: -94.14, zoom: 9, target: { kind: 'flight' as const, icao24: 'A44F9C', callsign: 'UPS903' } };
+    const params = encodeShareParams(view);
+    expect(params.get('flight')).toBe('a44f9c');
+    expect(params.get('cs')).toBe('UPS903');
+    expect(decodeShareView(params.toString())?.target).toEqual({ kind: 'flight', icao24: 'a44f9c', callsign: 'UPS903' });
+    expect(decodeShareTarget(params)).toEqual({ kind: 'flight', icao24: 'a44f9c', callsign: 'UPS903' });
+  });
+
+  it('carries a ship target through encode → decode', () => {
+    const view = { lat: 60.1, lng: 24.9, zoom: 9, target: { kind: 'ship' as const, mmsi: '230123450', name: 'FINNSTAR' } };
+    const params = encodeShareParams(view);
+    expect(params.get('ship')).toBe('230123450');
+    expect(params.get('sn')).toBe('FINNSTAR');
+    expect(decodeShareView(params.toString())?.target).toEqual({ kind: 'ship', mmsi: '230123450', name: 'FINNSTAR' });
+  });
+
+  it('resolves a target-only link (no lat/lon): the view is null, the target is not', () => {
+    expect(decodeShareView('flight=abc123')).toBeNull();
+    expect(decodeShareTarget('flight=abc123')).toEqual({ kind: 'flight', icao24: 'abc123' });
+    expect(decodeShareTarget('ship=230123450')).toEqual({ kind: 'ship', mmsi: '230123450' });
+  });
+
+  it('drops malformed targets instead of failing anything', () => {
+    // Not hex, not six chars, MMSI of the wrong length: all just absent.
+    expect(decodeShareTarget('flight=zzzzzz')).toBeNull();
+    expect(decodeShareTarget('flight=abc12')).toBeNull();
+    expect(decodeShareTarget('flight=abc1234')).toBeNull();
+    expect(decodeShareTarget('ship=12345')).toBeNull();
+    expect(decodeShareTarget('ship=abcdefghi')).toBeNull();
+    expect(decodeShareTarget('')).toBeNull();
+    // …and a bad target riding on a good view leaves the view intact.
+    expect(decodeShareView('lat=31.7&lon=-106.4&flight=nope')).toEqual({ lat: 31.7, lng: -106.4 });
+  });
+
+  it('drops a callsign or ship name that cannot ride in a link, keeping the identity', () => {
+    expect(decodeShareTarget('flight=abc123&cs=bad%22callsign')).toEqual({ kind: 'flight', icao24: 'abc123' });
+    expect(decodeShareTarget('ship=230123450&sn=%3Cscript%3E')).toEqual({ kind: 'ship', mmsi: '230123450' });
+  });
+
+  it('never encodes an invalid target identity', () => {
+    const params = encodeShareParams({ lat: 1, lng: 2, target: { kind: 'flight', icao24: 'not-hex!' } });
+    expect(params.get('flight')).toBeNull();
+    const shipParams = encodeShareParams({ lat: 1, lng: 2, target: { kind: 'ship', mmsi: '123' } });
+    expect(shipParams.get('ship')).toBeNull();
   });
 });

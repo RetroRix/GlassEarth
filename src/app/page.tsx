@@ -8,7 +8,8 @@ import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
 import { FLIGHT_STALE_REFETCH_ATTEMPTS, FLIGHT_STALE_REFETCH_MS, flightsForRide, hasFlightData, isPartialFlightPayload, isStaleFlightPayload, nextFlightRetryDelay, normalizeFlightPayload, recordForRide, type FlightFeedStatus } from '@/lib/flight-load';
-import { decodeShareView, type SharedView } from '@/lib/share-view';
+import { buildShareUrl, copyShareLink, decodeShareTarget, decodeShareView, type ShareTarget, type SharedView } from '@/lib/share-view';
+import { findSharedFlight, findSharedShip, flightsSweepLanded, shipsSweepLanded, shareTargetMissingMessage } from '@/lib/share-target';
 import { HOME_BASE, isValidLatLon, parseGeoResponse, readLastView, resolveOpeningTarget, writeLastView, type GeoLocation, type LastView } from '@/lib/opening-view';
 import { isHalloweenWindow, hasSpookyPreview, SPLASH_FAILSAFE_MS, SPOOKY_SPLASH_FAILSAFE_MS, SPLASH_STAGE3_HOLD_MS, SPOOKY_STAGE3_HOLD_MS } from '@/lib/seasonal';
 import { createViewHistory } from '@/lib/view-history';
@@ -334,6 +335,16 @@ export default function Dashboard() {
   >(null);
   const [navProgress, setNavProgress] = useState<NavProgress | null>(null);
   const [watchedFlights, setWatchedFlights] = useState<WatchedFlight[]>([]);
+  /* Shared-link targets (lib/share-view + lib/share-target): a link can name
+     a live flight or ship, not just a view. The page re-finds it in the feed,
+     centres on it, opens its popup and watches it — or says plainly that it
+     isn't being tracked right now, and keeps looking while the page is open. */
+  const [linkTarget, setLinkTarget] = useState<ShareTarget | null>(null);
+  const linkTargetDoneRef = useRef(false);
+  const linkTargetSweptRef = useRef(false);
+  const [linkTargetNotice, setLinkTargetNotice] = useState<{ text: string; tone: 'missing' | 'found' } | null>(null);
+  const [shareFocus, setShareFocus] = useState<{ kind: 'flight' | 'ship'; id: string; ts: number } | null>(null);
+  const [linkCopied, setLinkCopied] = useState<string | null>(null);
   /* Cockpit view (lib/cockpit): the ride's state machine. The map owns the
      follow camera; this owns entry, exit, and the view to come back to. */
   const [cockpitState, dispatchCockpit] = useReducer(cockpitReducer, COCKPIT_IDLE);
@@ -349,6 +360,70 @@ export default function Dashboard() {
         prev.some((w) => w.icao24 === f.icao24) ? prev : [...prev, f].slice(-6));
     };
   }, []);
+
+  /* Share a live target: build the link (the target's identity + where it
+     was when shared, so a recipient whose feed has lost it still lands
+     somewhere sensible), copy it, and say so. The layer that draws the
+     target rides in the link switched on. */
+  const shareFlightLink = useCallback((f: { icao24: string; callsign?: string }, pos?: { lat: number; lng: number } | null) => {
+    if (!f?.icao24) return;
+    const mv = mapViewRef.current;
+    const layers = Object.entries(activeLayersRef.current).filter(([, v]) => v).map(([k]) => k);
+    if (!layers.includes('flights')) layers.push('flights');
+    const url = buildShareUrl(window.location.origin, {
+      lat: pos?.lat ?? mv.latitude,
+      lng: pos?.lng ?? mv.longitude,
+      zoom: 9,
+      target: { kind: 'flight', icao24: f.icao24, callsign: f.callsign },
+    }, layers.join(','));
+    void copyShareLink(url).then((ok) => {
+      if (ok) setLinkCopied(`Link copied — whoever opens it lands on ${f.callsign || f.icao24.toUpperCase()}`);
+    });
+  }, []);
+
+  const shareShipLink = useCallback((s: { mmsi: string; name?: string }, pos?: { lat: number; lng: number } | null) => {
+    if (!/^\d{9}$/.test(s?.mmsi || '')) return;
+    const mv = mapViewRef.current;
+    const layers = Object.entries(activeLayersRef.current).filter(([, v]) => v).map(([k]) => k);
+    if (!layers.includes('maritime')) layers.push('maritime');
+    const url = buildShareUrl(window.location.origin, {
+      lat: pos?.lat ?? mv.latitude,
+      lng: pos?.lng ?? mv.longitude,
+      zoom: 9,
+      target: { kind: 'ship', mmsi: s.mmsi, name: s.name },
+    }, layers.join(','));
+    void copyShareLink(url).then((ok) => {
+      if (ok) setLinkCopied(`Link copied — whoever opens it lands on ${s.name || `MMSI ${s.mmsi}`}`);
+    });
+  }, []);
+
+  // The popups live in raw map HTML, so they hand share requests over
+  // through globals, like watch and ride already do.
+  useEffect(() => {
+    const w = window as unknown as {
+      osirisShareFlight?: (f: { icao24: string; callsign?: string; lat?: number; lng?: number }) => void;
+      osirisShareShip?: (s: { mmsi?: string | number; name?: string; lat?: number; lng?: number }) => void;
+    };
+    w.osirisShareFlight = (f) => {
+      if (!f?.icao24) return;
+      shareFlightLink(f, Number.isFinite(f.lat) && Number.isFinite(f.lng) ? { lat: f.lat as number, lng: f.lng as number } : null);
+    };
+    w.osirisShareShip = (s) => {
+      const mmsi = String(s?.mmsi ?? '');
+      if (!/^\d{9}$/.test(mmsi)) return;
+      shareShipLink(
+        { mmsi, name: s?.name },
+        Number.isFinite(s?.lat) && Number.isFinite(s?.lng) ? { lat: s?.lat as number, lng: s?.lng as number } : null,
+      );
+    };
+  }, [shareFlightLink, shareShipLink]);
+
+  // "Link copied" confirmations clear themselves.
+  useEffect(() => {
+    if (!linkCopied) return;
+    const t = setTimeout(() => setLinkCopied(null), 4000);
+    return () => clearTimeout(t);
+  }, [linkCopied]);
 
   const removeWatched = useCallback((icao24: string) => {
     setWatchedFlights((prev) => prev.filter((w) => w.icao24 !== icao24));
@@ -908,6 +983,11 @@ export default function Dashboard() {
   // layers, the panels, the live data, and what it marks on the map. It lives
   // here, so closing the panel keeps the conversation and its marks.
   const [oiHighlight, setOiHighlight] = useState<Highlight | null>(null);
+  /* Mirror of the layer set for the share-link handlers, which are
+     registered once (popup globals, below) but must encode the layers as
+     they are at click time, not at registration time. */
+  const activeLayersRef = useRef(activeLayers);
+  useEffect(() => { activeLayersRef.current = activeLayers; }, [activeLayers]);
   const [oiVoice, setOiVoice] = useState(() => typeof window !== 'undefined' && localStorage.getItem('osiris.oi.voice') === '1');
   const setOiVoicePersist = useCallback((on: boolean) => {
     setOiVoice(on);
@@ -1162,6 +1242,72 @@ export default function Dashboard() {
     setActiveCamera({ ...cam, type: 'cctv' });
   }, [dataVersion]);
 
+  /* Shared-link target: re-find the named flight or ship in the live feed.
+     Found → fly to it, open its popup, and (for a flight) watch it, so the
+     recipient lands on the very aircraft or vessel the sender meant.
+     Missing → the notice says so plainly once a real sweep has landed —
+     and the search keeps running on every later sweep, so a target that
+     appears while the page is open is still picked up. A target is matched
+     by identity alone (lib/share-target): never a nearby substitute. */
+  useEffect(() => {
+    if (!linkTarget || linkTargetDoneRef.current || !splashGone) return;
+    const d = dataRef.current as Record<string, unknown>;
+    const hit = linkTarget.kind === 'flight'
+      ? findSharedFlight(d, linkTarget.icao24)
+      : findSharedShip(d.maritime_ships as unknown[] | undefined, linkTarget.mmsi);
+    if (hit) {
+      linkTargetDoneRef.current = true;
+      if (linkTarget.kind === 'flight') {
+        const entry = { icao24: linkTarget.icao24, callsign: linkTarget.callsign || hit.label };
+        setWatchedFlights(prev => (prev.some(w => w.icao24 === entry.icao24) ? prev : [...prev, entry].slice(-6)));
+        if (hit.layerKey) {
+          const key = hit.layerKey;
+          setActiveLayers(prev => ((prev as Record<string, boolean>)[key] ? prev : { ...prev, [key]: true }));
+        }
+        setShareFocus({ kind: 'flight', id: linkTarget.icao24, ts: Date.now() });
+      } else {
+        setActiveLayers(prev => (prev.maritime ? prev : { ...prev, maritime: true }));
+        setShareFocus({ kind: 'ship', id: linkTarget.mmsi, ts: Date.now() });
+      }
+      setFlyToLocation({ lat: hit.lat, lng: hit.lng, zoom: 9, duration: 2600, ts: Date.now() });
+      setLinkTargetNotice(prev => (prev?.tone === 'missing'
+        ? { text: `Found it — now ${linkTarget.kind === 'flight' ? 'watching' : 'showing'} ${hit.label}.`, tone: 'found' as const }
+        : prev));
+      return;
+    }
+    const swept = linkTarget.kind === 'flight' ? flightsSweepLanded(d) : shipsSweepLanded(d);
+    if (swept && !linkTargetSweptRef.current) {
+      linkTargetSweptRef.current = true;
+      setLinkTargetNotice({ text: shareTargetMissingMessage(linkTarget), tone: 'missing' });
+    }
+  }, [linkTarget, dataVersion, splashGone]);
+
+  /* If the feed itself never lands (an outage, a blocked network), the
+     sweep-based announcement above can never fire — say the same thing on
+     a plain timer rather than leaving the visitor in silence. */
+  useEffect(() => {
+    if (!linkTarget || linkTargetDoneRef.current) return;
+    const t = setTimeout(() => {
+      if (linkTargetDoneRef.current || linkTargetSweptRef.current) return;
+      linkTargetSweptRef.current = true;
+      setLinkTargetNotice({ text: shareTargetMissingMessage(linkTarget), tone: 'missing' });
+    }, 25000);
+    return () => clearTimeout(t);
+  }, [linkTarget]);
+
+  // A "found it" notice clears itself; a "not tracked" one stays until
+  // dismissed or the target turns up.
+  useEffect(() => {
+    if (linkTargetNotice?.tone !== 'found') return;
+    const t = setTimeout(() => setLinkTargetNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [linkTargetNotice]);
+
+  const dismissLinkTarget = useCallback(() => {
+    setLinkTarget(null);
+    setLinkTargetNotice(null);
+  }, []);
+
   // On mount: restore layers and probe optional feeds
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1176,6 +1322,18 @@ export default function Dashboard() {
     if (shared) {
       sharedViewRef.current = shared;
       autoLocateCancelled.current = true;
+    }
+
+    // A shared link can also name a live target (a flight or a ship): the
+    // target, not the home-base opening, decides where this visit starts.
+    // Garbage target params decode to null and change nothing.
+    const target = decodeShareTarget(p);
+    if (target) {
+      setLinkTarget(target);
+      autoLocateCancelled.current = true;
+      if (target.kind === 'ship') {
+        setActiveLayers(prev => (prev.maritime ? prev : { ...prev, maritime: true }));
+      }
     }
 
     const layers = p.get('layers');
@@ -2210,6 +2368,7 @@ export default function Dashboard() {
           flyToLocation={flyToLocation}
           alertPinIds={pinnedAlertIds}
           openCameraId={shareCameraId}
+          shareFocus={shareFocus}
           scanTargets={scanTargets}
           demoMode={demoMode}
           theme={osirisTheme}
@@ -2360,6 +2519,34 @@ export default function Dashboard() {
       </AnimatePresence>
 
 
+      {/* ── SHARED-LINK NOTICES ── a copied target link confirms itself; a
+          link whose target isn't in the feed says so, plainly, up top. ── */}
+      {cockpitState.status !== 'riding' && (linkCopied || linkTargetNotice) && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[420] w-[min(92vw,440px)] pointer-events-auto flex flex-col gap-1.5">
+          {linkCopied && (
+            <div className="glass-panel px-3 py-2 text-[10px] font-mono tracking-wide text-[var(--alert-green)]" role="status">
+              {linkCopied}
+            </div>
+          )}
+          {linkTargetNotice && (
+            <div className="glass-panel px-3 py-2 flex items-start gap-2" role="status">
+              <span className={`text-[10px] font-mono tracking-wide leading-relaxed ${linkTargetNotice.tone === 'found' ? 'text-[var(--alert-green)]' : 'text-[var(--alert-orange)]'}`}>
+                {linkTargetNotice.text}
+                {linkTargetNotice.tone === 'missing' ? " If it appears while you're here, we'll pick it up." : ''}
+              </span>
+              <button
+                onClick={dismissLinkTarget}
+                title="Dismiss"
+                aria-label="Dismiss this notice"
+                className="p-0.5 shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── FLIGHT WATCH ── (steps aside while a cockpit ride owns the screen —
           the FPV frame carries nothing but corner readouts) */}
       {watchedFlights.length > 0 && cockpitState.status !== 'riding' && (
@@ -2376,6 +2563,7 @@ export default function Dashboard() {
             onLocate={(lat, lng) => setFlyToLocation({ lat, lng, zoom: 8, ts: Date.now() })}
             onDetail={handleAircraftDetail}
             onRide={enterCockpit}
+            onShare={(flight, telem) => shareFlightLink(flight, telem ? { lat: telem.lat, lng: telem.lng } : null)}
           />
         </motion.div>
       )}

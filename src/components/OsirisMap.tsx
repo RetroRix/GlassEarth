@@ -155,6 +155,10 @@ interface OsirisMapProps {
   aircraftAirports?: Record<string, Array<{ icao: string; iata?: string; city?: string; lat: number; lng: number }>>;
   /** Hands the page OI's globe layer, so a run draws without re-rendering the map. Null when it goes. */
   onOiGlobe?: (globe: OiGlobe | null) => void;
+  /** A shared-link target the page has just re-found in the live feed:
+   *  open its popup exactly as if it had been clicked. `ts` stamps each
+   *  resolution so re-finding the same target later still registers. */
+  shareFocus?: { kind: 'flight' | 'ship'; id: string; ts: number } | null;
   /** Ride along with this aircraft in the cockpit view (lib/cockpit). While
    *  set, the map's camera follows the aircraft; `locked` false means the
    *  visitor grabbed the map and the follow — not the ride — is paused. */
@@ -270,10 +274,17 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  /* The flight/ship popup builders, registered by the map-init effect so a
+     shared-link target the page resolved can open the very popup a click
+     would have opened (lib/share-target). Null until the map exists. */
+  const focusPopupRef = useRef<{
+    flight: (p: Record<string, unknown>, coords: [number, number]) => void;
+    ship: (p: Record<string, unknown>, coords: [number, number]) => void;
+  } | null>(null);
   /* Whether the camera dots are populated or ghosted right now — see
      lib/camera-ghosting. A ref because the map handlers that drive it are
      registered once on load, and the recolour effect consults it too. The
@@ -1172,6 +1183,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     // ── XSS PROTECTION HELPERS ──
     const htmlEsc = (s: any): string => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     const idSafe = (s: any): string => String(s ?? '').replace(/[^a-zA-Z0-9_\.\-]/g, '');
+    // A value made safe to sit inside a single-quoted JS string in an inline
+    // handler: backslash and quote escaped, `<` hex-escaped so the string can
+    // never close the tag it lives in.
+    const jsStr = (s: any): string => String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/</g, '\\x3c');
     // An http(s) link, escaped and ready for an href or src attribute: a quote
     // in a feed's URL would otherwise close the attribute and open a handler.
     const urlSafe = (s: any): string => { const u = String(s ?? ''); return /^https?:\/\//i.test(u) ? htmlEsc(u) : '#'; };
@@ -1185,12 +1200,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     };
 
     // ── Flights (with FlightAware + ADS-B Exchange links + ROUTE VISUALIZATION) ──
-    ['fl-commercial','fl-private','fl-jets','fl-military'].forEach(layer => {
-      map.on('click', layer, e => {
-        if (cockpitActiveRef.current) return; // a ride owns the screen — no popup over the FPV view
-        if (!e.features?.length) return;
-        const p = e.features[0].properties as any;
-        const coords = (e.features[0].geometry as any).coordinates;
+    // The builder stands alone so a shared-link target can open the very
+    // same popup without a click (focusPopupRef, registered further down).
+    const showFlightPopup = (p: any, coords: any) => {
         const cs = (p.callsign||'').trim();
 
         // Show initial popup immediately (without route data)
@@ -1213,6 +1225,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           </div>
           <button onclick="window.osirisWatchFlight && window.osirisWatchFlight({ icao24: '${idSafe(p.icao24||'')}', callsign: '${idSafe(cs)}' })" style="width:100%;margin-top:8px;padding:6px 12px;background:rgba(0,229,255,0.10);border:1px solid rgba(0,229,255,0.35);color:#7FE9FF;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">+ WATCH THIS AIRCRAFT</button>
           <button onclick="window.osirisRideFlight && window.osirisRideFlight({ icao24: '${idSafe(p.icao24||'')}', callsign: '${idSafe(cs)}' })" style="width:100%;margin-top:6px;padding:6px 12px;background:rgba(255,176,0,0.10);border:1px solid rgba(255,176,0,0.40);color:#FFC46B;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">RIDE IN THE COCKPIT</button>
+          <button onclick="window.osirisShareFlight && window.osirisShareFlight({ icao24: '${idSafe(p.icao24||'')}', callsign: '${idSafe(cs)}', lat: ${coords[1]}, lng: ${coords[0]} })" style="width:100%;margin-top:6px;padding:6px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.20);color:#B0BEC5;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">SHARE THIS FLIGHT</button>
           <div id="${routeLoadingId}" style="margin-top:8px;padding:6px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;">
             <span style="color:#5C5A54;font-size:9px;letter-spacing:0.1em;">RESOLVING ROUTE…</span>
           </div>
@@ -1285,6 +1298,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
             const el = document.getElementById(routeLoadingId);
             if (el) el.innerHTML = `<span style="color:#5C5A54;font-size:9px;">ROUTE UNAVAILABLE</span>`;
           });
+    };
+    ['fl-commercial','fl-private','fl-jets','fl-military'].forEach(layer => {
+      map.on('click', layer, e => {
+        if (cockpitActiveRef.current) return; // a ride owns the screen — no popup over the FPV view
+        if (!e.features?.length) return;
+        showFlightPopup(e.features[0].properties as any, (e.features[0].geometry as any).coordinates);
       });
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
@@ -1724,10 +1743,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Maritime Ships ──
-    map.on('click', 'ship-dots', e => {
-      if (!e.features?.length) return;
-      const p = e.features[0].properties as any;
-      const coords = (e.features[0].geometry as any).coordinates;
+    // Builder stands alone for the same reason as the flight one: a
+    // shared-link ship opens this popup without a click.
+    const showShipPopup = (p: any, coords: any) => {
       const color = p.type === 'military' ? '#FF1744' : p.type === 'tanker' ? '#FF9500' : '#00E5FF';
       const icon = p.type === 'military' ? '⚔️' : p.type === 'tanker' ? '🛢️' : '🚢';
       
@@ -1744,9 +1762,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <div><span style="color:#5C5A54;">LONGITUDE</span><br/><span style="color:#E8E6E0;font-family:monospace;">${coords[0].toFixed(4)}°</span></div>
         </div>
         <div><span style="color:#5C5A54;font-size:9px;">DESTINATION: </span><span style="color:#E8E6E0;font-size:9px;">${p.destination || 'UNKNOWN'}</span></div>
+        <button onclick="window.osirisShareShip && window.osirisShareShip({ mmsi: '${idSafe(p.mmsi||'')}', name: '${jsStr(p.name || '')}', lat: ${coords[1]}, lng: ${coords[0]} })" style="width:100%;margin-top:8px;padding:6px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.20);color:#B0BEC5;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">SHARE THIS SHIP</button>
         <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${p.mmsi}" target="_blank" style="${linkStyle}flex:1;text-align:center;color:${color};border:1px solid ${color}40;background:${color}15;display:inline-block;width:100%;box-sizing:border-box;margin-top:4px;">[ OPEN SOURCE ↗ ]</a>
       </div>`);
+    };
+    map.on('click', 'ship-dots', e => {
+      if (!e.features?.length) return;
+      showShipPopup(e.features[0].properties as any, (e.features[0].geometry as any).coordinates);
     });
+
+    // Shared-link targets (page → lib/share-target): the page re-finds the
+    // target in the feed and asks for its popup through this ref, so the
+    // popup a link opens is byte-for-byte the popup a click opens.
+    focusPopupRef.current = { flight: showFlightPopup, ship: showShipPopup };
 
     // ── Weather Events (NASA EONET + NOAA/NWS + GDACS) ──
     map.on('click', 'weather-dots', e => {
@@ -2008,6 +2036,46 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('jets', activeLayers.jets ? toFeatures(data.private_jets, 2) : []);
     setGeo('military', activeLayers.military ? toFeatures(data.military_flights) : []);
   }, [mapReady, data.commercial_flights, data.private_flights, data.private_jets, data.military_flights, activeLayers.flights, activeLayers.private, activeLayers.jets, activeLayers.military]);
+
+  /* Shared-link target focus (lib/share-target): the page resolved the
+     link's flight/ship in this same data and centred on it; open its popup
+     here, from the feed record itself, so what opens is exactly what a
+     click on the dot would have built. Guarded the way every map touch
+     must be (AGENTS.md): style loaded, builders registered, and any
+     failure degrades to "centred + watched, no popup" — never a crash. */
+  const shareFocusHandledRef = useRef(0);
+  useEffect(() => {
+    if (!shareFocus || !mapReady || shareFocusHandledRef.current === shareFocus.ts) return;
+    const openers = focusPopupRef.current;
+    const map = mapRef.current;
+    if (!openers || !map) return;
+    try {
+      if (!map.loaded()) return; // style not settled yet — a later data tick retries
+      if (shareFocus.kind === 'flight') {
+        const buckets = [data.commercial_flights, data.private_flights, data.private_jets, data.military_flights];
+        for (const arr of buckets) {
+          const f = (arr || []).find((x: any) => x?.icao24 === shareFocus.id);
+          if (f) {
+            shareFocusHandledRef.current = shareFocus.ts;
+            openers.flight(
+              { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24 },
+              [f.lng, f.lat],
+            );
+            return;
+          }
+        }
+      } else {
+        const s = (data.maritime_ships || []).find((x: any) => String(x?.mmsi ?? x?.id ?? '') === shareFocus.id);
+        if (s) {
+          shareFocusHandledRef.current = shareFocus.ts;
+          openers.ship(
+            { name: s.name || String(s.mmsi), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, mmsi: s.mmsi },
+            [s.lng, s.lat],
+          );
+        }
+      }
+    } catch { /* the page already centred + watched the target; the popup is a garnish */ }
+  }, [shareFocus, mapReady, data]);
 
   /**
    * Pull the palette out of the document whenever it can have changed.
@@ -2376,7 +2444,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
-    setGeo('maritime-ships', activeLayers.maritime && data.maritime_ships ? data.maritime_ships.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag } })) : []);
+    setGeo('maritime-ships', activeLayers.maritime && data.maritime_ships ? data.maritime_ships.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, mmsi: s.mmsi } })) : []);
   }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, setGeo]);
 
   useEffect(() => {
