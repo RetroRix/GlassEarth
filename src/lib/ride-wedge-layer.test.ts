@@ -102,3 +102,17 @@ describe('createRideWedgeLayer', () => {
     expect(() => layer.render(gl, {} as never)).not.toThrow();
   });
 });
+
+describe('wedge shader dialect — WebGL2 or it silently never paints', () => {
+  it('both shaders are GLSL ES 3.00 with a declared fragment out', async () => {
+    const { WEDGE_VERT, WEDGE_FRAG } = await import('./ride-wedge-layer');
+    expect(WEDGE_VERT.startsWith('#version 300 es')).toBe(true);
+    expect(WEDGE_FRAG.startsWith('#version 300 es')).toBe(true);
+    expect(WEDGE_FRAG).toContain('out vec4 fragColor');
+    expect(WEDGE_FRAG).not.toContain('gl_FragColor');
+    expect(WEDGE_VERT).not.toContain('attribute');
+    // The coverage test in the shader is the renderer's own line test.
+    expect(WEDGE_FRAG).toContain('u_horizon_normal');
+    expect(WEDGE_FRAG).toContain('gl_FragCoord');
+  });
+});

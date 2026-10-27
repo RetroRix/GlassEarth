@@ -113,21 +113,28 @@ export function hexToRgba01(hex: string): [number, number, number, number] | nul
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1];
 }
 
-const VERT = `
-attribute vec2 a_pos;
+/* The map runs WebGL2 and every custom layer in this app compiles
+   `#version 300 es` shaders with a self-declared `out vec4
+   fragColor` (see satellite-layer / wind-gl-layer). An ES 1.00
+   shader (attribute / gl_FragColor) fails compilation here — the
+   first version of this layer did exactly that and silently never
+   painted a pixel. */
+export const WEDGE_VERT = `#version 300 es
+in vec2 a_pos;
 void main() { gl_Position = vec4(a_pos, 1.0, 1.0); }
 `;
 
-const FRAG = `
+export const WEDGE_FRAG = `#version 300 es
 precision highp float;
 uniform vec2 u_horizon;
 uniform vec2 u_horizon_normal;
 uniform vec4 u_color;
+out vec4 fragColor;
 void main() {
   float blend = (gl_FragCoord.y - u_horizon.y) * u_horizon_normal.y
               + (gl_FragCoord.x - u_horizon.x) * u_horizon_normal.x;
   if (blend > ${WEDGE_OVERLAP_PX}.0) discard;
-  gl_FragColor = u_color;
+  fragColor = u_color;
 }
 `;
 
@@ -167,8 +174,8 @@ export function createRideWedgeLayer(colorRef: { current: string }): CustomLayer
     onAdd(m: MlMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
       map = m;
       try {
-        const vs = compile(gl, gl.VERTEX_SHADER, VERT);
-        const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+        const vs = compile(gl, gl.VERTEX_SHADER, WEDGE_VERT);
+        const fs = compile(gl, gl.FRAGMENT_SHADER, WEDGE_FRAG);
         if (!vs || !fs) return;
         const prog = gl.createProgram();
         if (!prog) return;
