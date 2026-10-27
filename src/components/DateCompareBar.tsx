@@ -102,6 +102,15 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
     try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch { /* storage blocked */ }
   }, [settings]);
 
+  // TEMP BEACON — removed after the mount investigation.
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[DC-BEACON] mounted');
+    return () => { // eslint-disable-next-line no-console
+      console.log('[DC-BEACON] UNMOUNTED');
+    };
+  }, []);
+
   // The calendar: the newest dates GIBS actually publishes.
   useEffect(() => {
     let cancelled = false;
@@ -150,6 +159,8 @@ export default function DateCompareBar({ mapRef, projection = 'globe', onOff }: 
       fadeDuration: 0,
       canvasContextAttributes: { antialias: false },
     });
+    // eslint-disable-next-line no-console
+    console.log('[DC-BEACON] overlay map constructed');
     overlayRef.current = overlay;
     applyMapProjection(overlay, projection);
     const sync = () => overlay.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
