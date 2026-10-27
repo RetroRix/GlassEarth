@@ -257,6 +257,10 @@ export async function collectAisstreamSnapshot(opts: {
   bbox: AisBbox;
   collectMs?: number;
   maxVessels?: number;
+  /** Called with a copy of a vessel's record each time a message improves
+      it — lets a long collection publish incrementally instead of only at
+      the end of the window. */
+  onVessel?: (vessel: AisVessel) => void;
   createSocket?: (url: string) => AisSocketLike | Promise<AisSocketLike>;
 }): Promise<AisCollectResult> {
   const collectMs = opts.collectMs ?? 4_000;
@@ -320,6 +324,11 @@ export async function collectAisstreamSnapshot(opts: {
                 return;
               }
               applyAisMessage(state, parsed, Date.now());
+              if (opts.onVessel) {
+                const mmsi = Number(parsed?.MetaData?.MMSI);
+                const rec = Number.isFinite(mmsi) ? state.vessels.get(mmsi) : undefined;
+                if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) opts.onVessel({ ...rec });
+              }
             } catch { /* malformed frame — the feed is not ours to trust */ }
           }).catch(() => { /* undecodable frame — ignore */ });
         });

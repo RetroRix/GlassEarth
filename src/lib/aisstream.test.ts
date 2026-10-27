@@ -241,6 +241,18 @@ describe('collectAisstreamSnapshot', () => {
     expect(sub.BoundingBoxes).toEqual([[[51, 3], [52.5, 5]]]);
   });
 
+  it('streams positioned vessels to onVessel as they are joined', async () => {
+    const seen: number[] = [];
+    const socket = fakeSocket([positionReport(244123456), staticData(244123456)]);
+    const result = await collectAisstreamSnapshot({
+      apiKey: 'TESTKEY', bbox, collectMs: 20,
+      createSocket: () => socket,
+      onVessel: v => { seen.push(v.mmsi); },
+    });
+    expect(result.status).toBe('ok');
+    expect(seen).toEqual([244123456, 244123456]); // position, then the static join improving it
+  });
+
   it('reports empty, not error, for a quiet patch of ocean', async () => {
     const result = await collectAisstreamSnapshot({
       apiKey: 'TESTKEY', bbox, collectMs: 20,

@@ -94,12 +94,18 @@ const CHOKEPOINTS = [
    code and total_ships meant "the Baltic". The honest serverless pattern
    is viewport-scoped snapshot collection: when a request carries the
    client's bbox, the route opens the socket server-side, gathers that
-   area's traffic for a few seconds, closes, and merges the snapshot into
-   the same ship store Digitraffic feeds. Per rounded-degree cell the
-   result is reused for AISSTREAM_CELL_TTL_MS, so panning around one port
-   costs one collection, not one per poll. Collected vessels accumulate on
-   the warm instance, which is also how the ShipStaticData join (name /
-   type / destination, broadcast minutes apart) ever completes.
+   area's traffic, closes, and merges the snapshot into the same ship
+   store Digitraffic feeds. Collection publishes incrementally (each
+   vessel lands in the store as it reports), the requesting GET waits
+   only a few seconds of it, and the rest of the window completes behind
+   the response — flow rates differ by orders of magnitude (Rotterdam
+   pours ~10 msgs/s, Los Angeles trickles ~0.6), so a single short window
+   would call sparse regions empty while they are merely slow. Per
+   rounded-degree cell the result is reused for AISSTREAM_CELL_TTL_MS,
+   so panning around one port costs one collection, not one per poll.
+   Collected vessels accumulate on the warm instance, which is also how
+   the ShipStaticData join (name / type / destination, broadcast minutes
+   apart) ever completes.
 
    The key is read ONLY from AISSTREAM_API_KEY, server-side. Without it the
    layer keeps working from Digitraffic alone and the payload says so.
@@ -107,7 +113,10 @@ const CHOKEPOINTS = [
    sparse mid-ocean, and the free tier's flow varies by region (the
    Singapore Strait trickled while Rotterdam poured, 2026-10-27). */
 
-const AISSTREAM_COLLECT_MS = 4_000;
+const AISSTREAM_COLLECT_MS = 20_000;
+/** How long a GET waits on a fresh collection before answering with
+    whatever has merged so far; the collection keeps running behind it. */
+const AISSTREAM_RESPONSE_WAIT_MS = 4_500;
 const AISSTREAM_CELL_TTL_MS = 90_000;
 
 const globalForAis = globalThis as unknown as {
@@ -145,14 +154,23 @@ async function ensureAisstream(bboxRaw: string | null): Promise<void> {
 
   const bbox = clampBboxSpan(parsed);
   const cellKey = bboxCellKey(bbox);
-  const cell = globalForAisstream.aisstreamCells.get(cellKey);
-  if (cell && Date.now() - cell.at < AISSTREAM_CELL_TTL_MS) return;
   const inflight = globalForAisstream.aisstreamInflight.get(cellKey);
   if (inflight) return inflight;
+  const cell = globalForAisstream.aisstreamCells.get(cellKey);
+  if (cell && Date.now() - cell.at < AISSTREAM_CELL_TTL_MS) return;
 
+  globalForAisstream.aisstreamCells.set(cellKey, { at: Date.now(), status: 'collecting', vessels: 0 });
+  globalForAisstream.aisstreamMeta = { status: 'collecting', at: Date.now(), vessels: 0 };
   const run = (async () => {
     try {
-      const result = await collectAisstreamSnapshot({ apiKey, bbox, collectMs: AISSTREAM_COLLECT_MS });
+      const result = await collectAisstreamSnapshot({
+        apiKey, bbox, collectMs: AISSTREAM_COLLECT_MS,
+        onVessel: (v) => {
+          const isNew = !shipsCache.has(v.mmsi);
+          shipsCache.set(v.mmsi, v);
+          if (isNew) clearMaritimeSnapshot();
+        },
+      });
       for (const v of result.vessels) shipsCache.set(v.mmsi, v);
       globalForAisstream.aisstreamCells!.set(cellKey, { at: Date.now(), status: result.status, vessels: result.vessels.length });
       globalForAisstream.aisstreamMeta = { status: result.status, at: Date.now(), vessels: result.vessels.length };
@@ -389,6 +407,7 @@ function buildSnapshot(now: number): string {
       as_of: aisMeta?.at ? new Date(aisMeta.at).toISOString() : null,
       vessels: shipSources.aisstream,
       collect_window_ms: AISSTREAM_COLLECT_MS,
+      response_wait_ms: AISSTREAM_RESPONSE_WAIT_MS,
       cell_ttl_ms: AISSTREAM_CELL_TTL_MS,
       coverage: 'Terrestrial AIS via AISStream — coastal and shipping-lane density; sparse mid-ocean. Not satellite AIS.',
     },
@@ -410,10 +429,16 @@ export async function GET(request?: NextRequest) {
   // Keyless live AIS (Baltic) — the layer's baseline live source.
   await ensureDigitraffic();
   // Global terrestrial AIS for the caller's viewport, when a bbox is given
-  // and the key is configured. Awaited, so the response that asked for a
-  // new area usually already carries its ships.
+  // and the key is configured. The GET waits only the response window of a
+  // fresh collection; the remainder completes behind the response and the
+  // next poll (10 s cadence while vessels are on the map) picks it up.
   const bboxRaw = request?.url ? new URL(request.url).searchParams.get('bbox') : null;
-  await ensureAisstream(bboxRaw);
+  if (bboxRaw) {
+    await Promise.race([
+      ensureAisstream(bboxRaw),
+      new Promise(resolve => setTimeout(resolve, AISSTREAM_RESPONSE_WAIT_MS)),
+    ]);
+  }
 
   const now = Date.now();
   const cached = globalForSnapshot.maritimeSnapshot;

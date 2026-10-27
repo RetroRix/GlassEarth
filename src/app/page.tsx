@@ -1659,6 +1659,7 @@ export default function Dashboard() {
      a new area is being gathered the row says so; when the feed errors it
      says the map is Baltic-only rather than going quiet. */
   const maritimeCellRef = useRef<string>('');
+  const maritimeRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchMaritime = useCallback(() => {
     const b = mapBoundsRef.current;
     const url = b ? `/api/maritime?bbox=${b.west},${b.south},${b.east},${b.north}` : '/api/maritime';
@@ -1670,6 +1671,16 @@ export default function Dashboard() {
       if (ais?.status === 'error') setMaritimeStatus('AISStream unavailable — Baltic AIS only');
       else if (ais?.status === 'empty') setMaritimeStatus('No AISStream traffic reported in this area');
       else if (ais?.status === 'ok' || ais?.status === 'not-configured') setMaritimeStatus(null);
+      else if (ais?.status === 'collecting') {
+        /* The server's collection window outlives its response wait, so a
+           sparse area is still gathering when this reply lands. Come back
+           once, shortly, instead of waiting out the slow poll gap that
+           applies while the map still shows no vessels. */
+        setMaritimeStatus('Gathering live AIS for this area…');
+        if (!maritimeRetryRef.current) {
+          maritimeRetryRef.current = setTimeout(() => { maritimeRetryRef.current = null; fetchMaritime(); }, 12_000);
+        }
+      }
       return { maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships };
     }).then(ok => {
       if (!ok) setMaritimeStatus('Maritime feed unavailable — retrying');
