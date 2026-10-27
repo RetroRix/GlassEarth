@@ -55,6 +55,8 @@ export default function LaunchLayers({ mapRef, mapStyle }: {
   mapStyle?: string;
 }) {
   const [fc, setFc] = useState<GeoJSON.FeatureCollection>(EMPTY);
+  const fcRef = useRef<GeoJSON.FeatureCollection>(EMPTY);
+  const seededRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const popup = useRef<Popup | null>(null);
 
   useEffect(() => {
@@ -68,7 +70,9 @@ export default function LaunchLayers({ mapRef, mapStyle }: {
         const sites = Array.isArray(body?.sites) && body.sites.length
           ? body.sites
           : groupSites(Array.isArray(body?.launches) ? body.launches : []);
-        setFc(sitesToGeoJson(sites));
+        const next = sitesToGeoJson(sites);
+        fcRef.current = next;
+        setFc(next);
       })
       .catch(() => { /* keep the last good collection */ });
     load();
@@ -80,43 +84,53 @@ export default function LaunchLayers({ mapRef, mapStyle }: {
     const map = mapRef.current;
     if (!map) return;
     void mapStyle;
-    // Mounted only once the map style has loaded (mapReady upstream);
-    // still, construction errors degrade to "no layer", never a dead map.
-    try {
-      if (!map.getSource(SOURCE)) {
-        map.addSource(SOURCE, { type: 'geojson', data: fc, attribution: ATTRIBUTION });
-      } else {
-        (map.getSource(SOURCE) as GeoJSONSource).setData(fc);
+    // The app re-applies styles during boot (theme, projection, opening
+    // flight) and a setStyle wipes foreign sources/layers wholesale.
+    // ensure() is idempotent and re-runs on every styledata, so the
+    // layer heals itself within a frame of any swap — and on fc
+    // updates it simply re-seeds the data.
+    const ensure = () => {
+      try {
+        if (!map.getSource(SOURCE)) {
+          map.addSource(SOURCE, { type: 'geojson', data: fcRef.current, attribution: ATTRIBUTION });
+          seededRef.current = fcRef.current;
+        } else if (seededRef.current !== fcRef.current) {
+          // setData re-fires styledata; seed only on a genuine change
+          // so ensure() can never loop on its own event.
+          (map.getSource(SOURCE) as GeoJSONSource).setData(fcRef.current);
+          seededRef.current = fcRef.current;
+        }
+        if (!map.getLayer('launch-site-points')) {
+          map.addLayer({
+            id: 'launch-site-points', type: 'circle', source: SOURCE,
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 5, 8, 8],
+              'circle-color': '#FF6D00', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.4,
+            },
+          });
+          map.addLayer({
+            id: 'launch-site-label', type: 'symbol', source: SOURCE,
+            layout: {
+              'text-field': ['get', 'siteName'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-anchor': 'top',
+              'text-font': ['Noto Sans Regular'], 'text-allow-overlap': false,
+            },
+            paint: { 'text-color': '#FFCCBC', 'text-halo-color': 'rgba(0,0,0,0.75)', 'text-halo-width': 1.2 },
+          });
+          map.addLayer({
+            id: 'launch-site-count', type: 'symbol', source: SOURCE,
+            layout: {
+              'text-field': ['to-string', ['get', 'count']], 'text-size': 10,
+              'text-font': ['Noto Sans Regular'], 'text-allow-overlap': true,
+            },
+            paint: { 'text-color': '#ffffff' },
+          });
+        }
+      } catch (e) {
+        console.warn('[OSIRIS] launches layer:', e);
       }
-      if (!map.getLayer('launch-site-points')) {
-        map.addLayer({
-          id: 'launch-site-points', type: 'circle', source: SOURCE,
-          paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 5, 8, 8],
-            'circle-color': '#FF6D00', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.4,
-          },
-        });
-        map.addLayer({
-          id: 'launch-site-label', type: 'symbol', source: SOURCE,
-          layout: {
-            'text-field': ['get', 'siteName'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-anchor': 'top',
-            'text-font': ['Noto Sans Regular'], 'text-allow-overlap': false,
-          },
-          paint: { 'text-color': '#FFCCBC', 'text-halo-color': 'rgba(0,0,0,0.75)', 'text-halo-width': 1.2 },
-        });
-        map.addLayer({
-          id: 'launch-site-count', type: 'symbol', source: SOURCE,
-          layout: {
-            'text-field': ['to-string', ['get', 'count']], 'text-size': 10,
-            'text-font': ['Noto Sans Regular'], 'text-allow-overlap': true,
-          },
-          paint: { 'text-color': '#ffffff' },
-        });
-      }
-    } catch (e) {
-      console.warn('[OSIRIS] launches layer:', e);
-      return;
-    }
+    };
+    ensure();
+    map.on('styledata', ensure);
     const onClick = (e: MapLayerMouseEvent) => {
       const f = e.features?.[0];
       if (!f) return;
@@ -132,6 +146,7 @@ export default function LaunchLayers({ mapRef, mapStyle }: {
     map.on('mouseenter', 'launch-site-points', onEnter);
     map.on('mouseleave', 'launch-site-points', onLeave);
     return () => {
+      map.off('styledata', ensure);
       map.off('click', 'launch-site-points', onClick);
       map.off('mouseenter', 'launch-site-points', onEnter);
       map.off('mouseleave', 'launch-site-points', onLeave);
