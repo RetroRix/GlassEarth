@@ -21,6 +21,8 @@ const FAILURE_TTL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 20_000;
 /** The nationwide files run to a few megabytes, and Great Britain's sometimes takes half a minute to be handed out. */
 const ZIP_FETCH_TIMEOUT_MS = 45_000;
+/** Amtraker's answer is a few hundred kilobytes from a small community host that sometimes takes its time; capped at the route's own 30 s budget. */
+const AMTRAKER_FETCH_TIMEOUT_MS = 30_000;
 /**
  * A read this recent is still shown while the next one is fetched, so a slow
  * operator never holds up the map; only a feed nobody has watched lately waits.
@@ -134,7 +136,7 @@ function refresh(feed: TransitFeed, fetchImpl: typeof fetch, hit: Entry | undefi
     try {
       const req = requestFor(feed);
       if (!req) throw new Error('no key configured');
-      const timeout = feed.format === 'zip' ? ZIP_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS;
+      const timeout = feed.format === 'zip' ? ZIP_FETCH_TIMEOUT_MS : feed.format === 'amtraker' ? AMTRAKER_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS;
       const res = await fetchImpl(req.url, { headers: req.headers, signal: AbortSignal.timeout(timeout) });
       // A refused key is the most likely failure of a keyed feed; say which it is.
       if (res.status === 401 || res.status === 403) throw new Error(feed.key ? `key refused (HTTP ${res.status})` : `HTTP ${res.status}`);
