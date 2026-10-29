@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import ErrorBoundary from '@/components/ErrorBoundary';
 import "./globals.css";
 
@@ -183,6 +184,7 @@ export default function RootLayout({
         <ErrorBoundary name="Glass Earth Core">
           {children}
         </ErrorBoundary>
+        <Analytics />
       </body>
     </html>
   );
