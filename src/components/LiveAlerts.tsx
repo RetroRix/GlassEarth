@@ -8,6 +8,7 @@ import {
   Search, X, RefreshCw, Image as ImageIcon, Play, Eye, Repeat2, CornerDownRight, Waves, Layers, AlertTriangle,
 } from 'lucide-react';
 import AiOverview from './AiOverview';
+import DataAge from '@/components/DataAge';
 import {
   ALERT_KINDS, BLOCS, BLOC_ORDER, buildThreads, groupStatements, timeAgo, type AlertKind, type Bloc, type DigestReport,
 } from '@/lib/alert-digest';
@@ -20,6 +21,8 @@ interface LiveAlertsData {
   earthquakes?: unknown[];
   weather_events?: unknown[];
   news_meta?: { sources?: SourceHealth[]; fetchedAt?: string | null };
+  /** When each page feed last answered (page feed_times) — data-age chips. */
+  feed_times?: Record<string, number>;
 }
 
 /** Where to fly: `alertId` also opens that report's pin on the map. */
@@ -1178,6 +1181,10 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed, onRefresh, pin
           )}
           {fetchedAt && <span title={`Feed fetched ${new Date(fetchedAt).toLocaleString()}`}>· UPDATED {timeAgo(fetchedAt, now).toUpperCase()}</span>}
           {breakingCount > 0 && <span className="text-[#FF6B6B]">· {breakingCount} BREAKING</span>}
+        </div>
+        <div className="flex items-center gap-3 px-3 pb-1.5 whitespace-nowrap overflow-hidden">
+          <DataAge label="Quakes" fetchedAt={data.feed_times?.quakes ?? null} feed="quakes" />
+          <DataAge label="Weather" fetchedAt={data.feed_times?.weather ?? null} feed="weather" />
         </div>
       </div>
 

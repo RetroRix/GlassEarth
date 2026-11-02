@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { X, Plane, Gauge, ArrowUp, Radio, Crosshair, Loader2, Navigation, Share2, Check } from 'lucide-react';
+import DataAge from '@/components/DataAge';
 
 /* ═══════════════════════════════════════════════════════════════
    OSIRIS — Flight Watch
@@ -160,6 +161,9 @@ interface FlightWatchPanelProps {
   onRide?: (flight: WatchedFlight) => void;
   /** Copy a link that re-opens the app on this aircraft (lib/share-view targets). */
   onShare?: (flight: WatchedFlight, telem?: FlightTelemetry) => void;
+  /** When the flights feed last answered (page feed_times) — the cards
+      below are only as fresh as this; the age chip says so. */
+  feedFetchedAt?: number | null;
 }
 
 /** Feet is what aviation actually uses; the feed reports metres. */
@@ -339,12 +343,15 @@ function Row({ flight, telem, onRemove, onLocate, onDetail, onRide, onShare }: {
 }
 
 export default function FlightWatchPanel({
-  watched, telemetry, onRemove, onLocate, onDetail, onRide, onShare,
+  watched, telemetry, onRemove, onLocate, onDetail, onRide, onShare, feedFetchedAt,
 }: FlightWatchPanelProps) {
   if (watched.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-1.5">
+      <div className="glass-panel px-2.5 py-1.5">
+        <DataAge label="Flights feed" fetchedAt={feedFetchedAt} feed="flights" />
+      </div>
       {watched.map((f) => (
         <Row
           key={f.icao24}

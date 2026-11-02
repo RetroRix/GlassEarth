@@ -5,6 +5,7 @@ import { ExternalLink, MapPin, Rocket, X } from 'lucide-react';
 import {
   countdownTo, formatCountdown, isProvisional, type LaunchRecord,
 } from '@/lib/launches';
+import DataAge from '@/components/DataAge';
 
 /**
  * OSIRIS — the Launches panel: the next launches soonest-first with
@@ -128,6 +129,7 @@ export default function LaunchesPanel({ onClose, onLocate }: {
   onLocate: (lat: number, lng: number, zoom: number) => void;
 }) {
   const [launches, setLaunches] = useState<LaunchRecord[] | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -143,7 +145,11 @@ export default function LaunchesPanel({ onClose, onLocate }: {
       .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((body: LaunchesBody) => {
         if (cancelled) return;
-        if (Array.isArray(body?.launches)) { setLaunches(body.launches); setFailed(false); }
+        if (Array.isArray(body?.launches)) {
+          setLaunches(body.launches); setFailed(false);
+          const gen = Date.parse(body?.generatedAt ?? '');
+          setGeneratedAt(Number.isFinite(gen) ? gen : null);
+        }
       })
       .catch(() => { if (!cancelled) setFailed(true); });
     load();
@@ -203,6 +209,7 @@ export default function LaunchesPanel({ onClose, onLocate }: {
         )}
         <div className="px-3 py-3 font-mono text-[9px] leading-relaxed text-white/30">
           Times are NET (No Earlier Than) from Launch Library 2 / The Space Devs; statuses are shown exactly as the feed reports them.
+          <div className="mt-1.5"><DataAge label="Launch data" fetchedAt={generatedAt} feed="launches" /></div>
         </div>
       </div>
     </div>

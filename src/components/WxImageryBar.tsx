@@ -9,6 +9,7 @@ import {
   type WxFrames, type WxSourceKey,
 } from '@/lib/weather-imagery';
 import { BoxShell, clock, IconButton, Legend, TextButton, TimeReadout, TimeTrack, Tune } from '@/components/TimeBox';
+import DataAge from '@/components/DataAge';
 
 /**
  * OSIRIS — the NOAA weather-imagery suite's box: nowCOAST's MRMS radar,
@@ -330,6 +331,9 @@ export default function WxImageryBar({ mapRef, mapStyle, active, onOff }: {
       ) : (
         <div className="min-h-[34px] pt-1 text-[10px] tracking-[0.18em] text-white/40">{unavailable ? 'NOWCOAST UNAVAILABLE — RETRYING' : 'LOADING FRAMES…'}</div>
       )}
+      <div className="mt-0.5">
+        <DataAge label="Newest frame" fetchedAt={timeline.length ? last : null} feed="weatherImagery" />
+      </div>
 
       {frames && timeline.length > 0 && (
         <div className="mt-1 flex flex-col gap-0.5">

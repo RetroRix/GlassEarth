@@ -1743,7 +1743,22 @@ export default function Dashboard() {
       const res = await fetch(url, { ...options, cache: 'no-store' });
       if (res.ok) {
         const json = await res.json();
-        const d = transform ? transform(json) : json;
+        let d = transform ? transform(json) : json;
+        /* Data-age bookkeeping (Globe Command scout, 2026-11-02): record
+           when each feed last answered, so the cards that render it can
+           show a real age and flag themselves STALE. Only successes are
+           recorded — a failed fetch must never freshen an age. */
+        const feedKey =
+          url.startsWith('/api/flights') ? 'flights'
+          : url.startsWith('/api/earthquakes') ? 'quakes'
+          : url.startsWith('/api/maritime') ? 'ships'
+          : url.startsWith('/api/weather') ? 'weather'
+          : url.startsWith('/api/satellites') && !url.includes('/passes') ? 'satellites'
+          : null;
+        if (feedKey) {
+          const prev = (dataRef.current as { feed_times?: Record<string, number> }).feed_times ?? {};
+          d = { ...d, feed_times: { ...prev, [feedKey]: Date.now() } };
+        }
         dataRef.current = { ...dataRef.current, ...d };
         setDataVersion(v => v + 1);
         setBackendStatus('connected');
@@ -2744,6 +2759,7 @@ export default function Dashboard() {
           <FlightWatchPanel
             watched={watchedFlights}
             telemetry={watchTelemetry}
+            feedFetchedAt={(data.feed_times as Record<string, number> | undefined)?.flights ?? null}
             onRemove={removeWatched}
             onLocate={(lat, lng) => setFlyToLocation({ lat, lng, zoom: 8, ts: Date.now() })}
             onDetail={handleAircraftDetail}
