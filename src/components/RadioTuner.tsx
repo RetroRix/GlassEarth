@@ -36,6 +36,8 @@ import {
 const SKIP_BEAT_MS = 1400;
 const SCAN_ZOOM = 4;
 const LAND_ZOOM = 5;
+/** SCAN mode dwell: each station plays this long before the dial moves on. */
+const SCAN_DWELL_MS = 15_000;
 
 interface RadioTunerProps {
   onClose: () => void;
@@ -52,6 +54,7 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
   const [dial, setDial] = useState<DialStation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [index, setIndex] = useState(-1);
+  const [scanOn, setScanOn] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanFraction, setScanFraction] = useState(0.5);
   const [scanIndex, setScanIndex] = useState(-1);
@@ -96,7 +99,10 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
   const land = useCallback((idx: number, manual: boolean) => {
     const d = dialRef.current;
     if (!d || idx < 0 || idx >= d.length) return;
-    if (manual) triedRef.current = new Set();
+    if (manual) {
+      triedRef.current = new Set();
+      setScanOn(false); // a deliberate landing ends SCAN — the visitor is driving now
+    }
     setIndex(idx);
     setNotice(null);
     const s = d[idx];
@@ -110,6 +116,23 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
     const from = indexRef.current >= 0 ? indexRef.current : (delta > 0 ? -1 : 0);
     land(stepIndex(from, delta, d.length), true);
   }, [land]);
+
+  /* SCAN mode (Globe Command scout, 2026-11-02): the dial advances on
+     its own every SCAN_DWELL_MS, playing each stop briefly. Landings are
+     non-manual, so the dead-stream chain below keeps its tried-set: a
+     station that fails mid-scan is skipped by that chain, and the scan
+     continues from wherever the chain landed. Any deliberate landing
+     (drag, step, arrow key) turns SCAN off in `land`. */
+  useEffect(() => {
+    if (!scanOn) return;
+    const iv = setInterval(() => {
+      const d = dialRef.current;
+      if (!d || !d.length) return;
+      const from = indexRef.current >= 0 ? indexRef.current : -1;
+      land(stepIndex(from, 1, d.length), false);
+    }, SCAN_DWELL_MS);
+    return () => clearInterval(iv);
+  }, [scanOn, land]);
 
   /* Dead-stream skip: the playback owner reported the landed station
      failed. Show it, wait the beat, tune on past everything that has
@@ -125,6 +148,7 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
     const failedName = d[idx].name;
     const next = nextUntriedIndex(idx, 1, d.length, triedRef.current);
     if (next < 0) {
+      setScanOn(false);
       setNotice(`${failedName} did not answer — and every other station on the dial has been tried. Drag the needle somewhere new.`);
       return;
     }
@@ -225,7 +249,16 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
                 ? `${dial.length} stations on the dial — the world's coordinate-bearing stations, west → east`
                 : 'No stations on the dial'}
           </span>
-          <button onClick={onClose} className="ml-auto rounded-sm border border-white/15 p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white" title="Close tuner (the music keeps playing)">
+          <button
+            onClick={() => setScanOn(v => !v)}
+            disabled={!dial?.length}
+            aria-pressed={scanOn}
+            className={`ml-auto rounded-sm border px-2 py-1.5 font-mono text-[9px] font-bold tracking-[0.2em] transition-colors disabled:opacity-30 ${scanOn ? 'border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'}`}
+            title="Scan — play each station for 15 seconds, then move on; dead streams skip themselves"
+          >
+            SCAN
+          </button>
+          <button onClick={onClose} className="rounded-sm border border-white/15 p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white" title="Close tuner (the music keeps playing)">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -251,6 +284,7 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
                   {shown.codec ? ` · ${shown.codec}` : ''}{shown.bitrate ? ` ${shown.bitrate}k` : ''}
                   {` · ${shown.lat.toFixed(2)}°, ${formatLongitude(shown.lng)}`}
                   {dial ? ` · station ${(scanning ? scanIndex : index) + 1} of ${dial.length}` : ''}
+                  {scanOn && !scanning ? ' · SCAN ON' : ''}
                 </div>
               </>
             ) : (

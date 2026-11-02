@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, Radio, Square, Volume2, X } from 'lucide-react';
+import { Pause, Play, Radio, SlidersHorizontal, Square, Volume2, X } from 'lucide-react';
 import { isMixedContent, type RadioStation } from '@/lib/stations';
 
 /**
@@ -17,6 +17,10 @@ import { isMixedContent, type RadioStation } from '@/lib/stations';
 interface RadioNowPlayingProps {
   station: RadioStation;
   onStop: () => void;
+  /** Jump back to the Radio Tuner — this bar is the persistent
+      mini-player (Globe Command scout, 2026-11-02): playback survives
+      panel closes, and this is the way back to the dial. */
+  onOpenTuner?: () => void;
   /** Fired once per station when its stream proves unplayable (error or
       http-blocked). The Radio Tuner listens to auto-skip dead stops. */
   onFailed?: (station: RadioStation) => void;
@@ -26,7 +30,7 @@ interface RadioNowPlayingProps {
   onPlaying?: (station: RadioStation) => void;
 }
 
-export default function RadioNowPlaying({ station, onStop, onFailed, onPlaying }: RadioNowPlayingProps) {
+export default function RadioNowPlaying({ station, onStop, onFailed, onPlaying, onOpenTuner }: RadioNowPlayingProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(0.8);
@@ -77,6 +81,12 @@ export default function RadioNowPlaying({ station, onStop, onFailed, onPlaying }
                 : `${station.country}${station.state ? ` · ${station.state}` : ''}${station.codec ? ` · ${station.codec}` : ''}${station.bitrate ? ` ${station.bitrate}k` : ''} · Radio Browser`}
           </div>
         </div>
+
+        {onOpenTuner && (
+          <button onClick={onOpenTuner} className="rounded-sm border border-white/15 p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white" title="Open the Radio Tuner">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+          </button>
+        )}
 
         {!blocked && !failed && (
           <>

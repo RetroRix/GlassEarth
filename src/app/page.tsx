@@ -3683,6 +3683,7 @@ export default function Dashboard() {
       {radioStation && (
         <RadioNowPlaying
           station={radioStation}
+          onOpenTuner={() => { setShowTuner(true); setShowStations(false); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); setShowSpotting(false); }}
           onStop={() => { radioSourceRef.current = null; setRadioStation(null); }}
           onFailed={(s) => setRadioFailure({ uuid: s.uuid, at: Date.now() })}
           onPlaying={(s) => setMissionRadioPlaying({ uuid: s.uuid, at: Date.now(), source: radioSourceRef.current })}
