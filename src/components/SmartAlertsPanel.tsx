@@ -37,7 +37,7 @@ export function useSmartAlertsEngine(anchor: Anchor | null): SmartAlertsEngine {
     () => (typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'),
   );
   const recordRef = useRef(record);
-  recordRef.current = record;
+  useEffect(() => { recordRef.current = record; }, [record]);
   const checkingRef = useRef(false);
 
   const persist = useCallback((next: SmartAlertsRecord) => {
