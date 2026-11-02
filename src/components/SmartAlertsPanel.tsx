@@ -5,16 +5,34 @@ import { Activity, Bell, BellRing, Rocket, Satellite, X } from 'lucide-react';
 import {
   applyFired, evaluateIssPasses, evaluateLaunches, evaluateQuakes,
   loadSmartAlertsRecord, newAlerts, saveSmartAlertsRecord, unreadCount,
-  type Anchor, type SmartAlert, type SmartAlertPrefs, type SmartAlertsRecord,
+  type Anchor, type IssPassLike, type LaunchLike, type QuakeLike,
+  type SmartAlert, type SmartAlertPrefs, type SmartAlertsRecord,
 } from '@/lib/smart-alerts';
+import { rateNearMe, type HeatLike } from '@/lib/near-me';
 
 const ISS_NORAD = '25544';
 const CHECK_EVERY_MS = 5 * 60_000;
+
+/** The raw feed snapshots from the engine's latest check — the NEAR ME
+    card scores these. null = the feed didn't answer this check. */
+export interface SmartAlertFeeds {
+  quakes: QuakeLike[] | null;
+  quakesAt: number | null;
+  passes: IssPassLike[] | null;
+  passesAt: number | null;
+  launches: LaunchLike[] | null;
+  launchesAt: number | null;
+}
+
+const EMPTY_FEEDS: SmartAlertFeeds = {
+  quakes: null, quakesAt: null, passes: null, passesAt: null, launches: null, launchesAt: null,
+};
 
 export interface SmartAlertsEngine {
   record: SmartAlertsRecord;
   unread: number;
   lastCheckAt: number | null;
+  feeds: SmartAlertFeeds;
   permission: NotificationPermission | 'unsupported';
   updatePrefs: (patch: Partial<SmartAlertPrefs>) => void;
   markSeen: () => void;
@@ -33,6 +51,7 @@ export interface SmartAlertsEngine {
 export function useSmartAlertsEngine(anchor: Anchor | null): SmartAlertsEngine {
   const [record, setRecord] = useState<SmartAlertsRecord>(() => loadSmartAlertsRecord());
   const [lastCheckAt, setLastCheckAt] = useState<number | null>(null);
+  const [feeds, setFeeds] = useState<SmartAlertFeeds>(EMPTY_FEEDS);
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     () => (typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'),
   );
@@ -59,45 +78,49 @@ export function useSmartAlertsEngine(anchor: Anchor | null): SmartAlertsEngine {
       const p = current.prefs;
       const candidates: SmartAlert[] = [];
       const jobs: Promise<void>[] = [];
+      /* Snapshots for the NEAR ME card: the feeds are read on every check
+         whether or not their alert toggle is on (the card is a summary of
+         the same feeds, not an alert); the toggles still gate the alerts. */
+      const snap: SmartAlertFeeds = { ...EMPTY_FEEDS };
 
-      if (p.quakesEnabled && anchor) {
+      if (anchor) {
         jobs.push(
           fetch('/api/earthquakes', { signal: AbortSignal.timeout(10_000) })
             .then(r => (r.ok ? r.json() : null))
             .then(d => {
               if (Array.isArray(d?.earthquakes)) {
-                candidates.push(...evaluateQuakes(d.earthquakes, anchor, p, now));
+                snap.quakes = d.earthquakes; snap.quakesAt = now;
+                if (p.quakesEnabled) candidates.push(...evaluateQuakes(d.earthquakes, anchor, p, now));
               }
             })
             .catch(() => { /* a failed feed produces no alerts, never fake ones */ }),
         );
-      }
-      if (p.issEnabled && anchor) {
         jobs.push(
           fetch(`/api/satellites/passes?id=${ISS_NORAD}&lat=${anchor.lat}&lng=${anchor.lng}`, { signal: AbortSignal.timeout(10_000) })
             .then(r => (r.ok ? r.json() : null))
             .then(d => {
               if (Array.isArray(d?.passes)) {
-                candidates.push(...evaluateIssPasses(d.passes, anchor, p, now));
+                snap.passes = d.passes; snap.passesAt = now;
+                if (p.issEnabled) candidates.push(...evaluateIssPasses(d.passes, anchor, p, now));
               }
             })
             .catch(() => { /* as above */ }),
         );
       }
-      if (p.launchesEnabled) {
-        jobs.push(
-          fetch('/api/launches', { signal: AbortSignal.timeout(15_000) })
-            .then(r => (r.ok ? r.json() : null))
-            .then(d => {
-              if (Array.isArray(d?.launches)) {
-                candidates.push(...evaluateLaunches(d.launches, p, now));
-              }
-            })
-            .catch(() => { /* as above */ }),
-        );
-      }
+      jobs.push(
+        fetch('/api/launches', { signal: AbortSignal.timeout(15_000) })
+          .then(r => (r.ok ? r.json() : null))
+          .then(d => {
+            if (Array.isArray(d?.launches)) {
+              snap.launches = d.launches; snap.launchesAt = now;
+              if (p.launchesEnabled) candidates.push(...evaluateLaunches(d.launches, p, now));
+            }
+          })
+          .catch(() => { /* as above */ }),
+      );
 
       await Promise.all(jobs);
+      setFeeds(snap);
       const fresh = newAlerts(candidates, recordRef.current);
       if (fresh.length) {
         persist(applyFired(recordRef.current, fresh, now));
@@ -151,6 +174,7 @@ export function useSmartAlertsEngine(anchor: Anchor | null): SmartAlertsEngine {
     record,
     unread: unreadCount(record),
     lastCheckAt,
+    feeds,
     permission,
     updatePrefs,
     markSeen,
@@ -227,11 +251,68 @@ function Choice({ value, options, onChange, label }: {
 interface PanelProps {
   engine: SmartAlertsEngine;
   anchor: Anchor | null;
+  /** NASA FIRMS heat detections the page has already loaded for the
+      Fires layer — the NEAR ME card scores them only when present. */
+  fires?: HeatLike[] | null;
   onClose: () => void;
   onLocate: (lat: number, lng: number) => void;
 }
 
-export default function SmartAlertsPanel({ engine, anchor, onClose, onLocate }: PanelProps) {
+const NEAR_ME_COLOR = { QUIET: '#4ADE80', WATCH: '#FFD54F', ELEVATED: '#FF7043' } as const;
+
+function NearMeCard({ engine, anchor, fires, now }: {
+  engine: SmartAlertsEngine;
+  anchor: Anchor | null;
+  fires: HeatLike[] | null;
+  now: number;
+}) {
+  const feeds = engine.feeds;
+  const result = useMemo(() => (anchor
+    ? rateNearMe({ anchor, quakes: feeds.quakes, passes: feeds.passes, launches: feeds.launches, fires, now })
+    : null), [anchor, feeds, fires, now]);
+  const checked: string[] = [];
+  if (feeds.quakesAt) checked.push(`quakes ${ago(feeds.quakesAt, now)}`);
+  if (feeds.passesAt) checked.push(`ISS times ${ago(feeds.passesAt, now)}`);
+  if (feeds.launchesAt) checked.push(`launches ${ago(feeds.launchesAt, now)}`);
+
+  return (
+    <div className="border-b border-white/10 px-3 py-3" data-testid="near-me-card">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">Near me · 500 km</span>
+        {anchor && <span className="font-mono text-[8px] uppercase tracking-wider text-white/30">around {anchor.label}</span>}
+      </div>
+      {!anchor || !result ? (
+        <div className="mt-1.5 font-mono text-[11px] leading-relaxed text-white/40">
+          NEAR ME needs a location anchor — once the app knows where “near” is, this card rates what the feeds show around it.
+        </div>
+      ) : (
+        <>
+          <div className="mt-1 font-mono text-[26px] font-bold leading-none tracking-[0.15em]" style={{ color: NEAR_ME_COLOR[result.level] }}>
+            {result.level}
+          </div>
+          {result.reasons.length === 0 ? (
+            <div className="mt-1.5 text-[10px] leading-relaxed text-white/50">Nothing on the feeds stands out right now.</div>
+          ) : (
+            <ul className="mt-1.5 flex flex-col gap-1">
+              {result.reasons.map(r => (
+                <li key={r} className="text-[10px] leading-relaxed text-white/70">• {r}</li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-2 font-mono text-[8px] leading-relaxed text-white/35">
+            {result.inputs.map(i => <div key={i}>{i}</div>)}
+            <div className="mt-1 text-white/45">
+              A plain-English summary of these feeds — not an official risk level or warning.
+              {checked.length ? ` Checked: ${checked.join(' · ')}.` : ' First check still running.'}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function SmartAlertsPanel({ engine, anchor, fires = null, onClose, onLocate }: PanelProps) {
   const { record, permission } = engine;
   const prefs = record.prefs;
   const [now, setNow] = useState(() => Date.now());
@@ -260,6 +341,8 @@ export default function SmartAlertsPanel({ engine, anchor, onClose, onLocate }: 
           Checks run every few minutes <span className="text-white/70">while this tab is open</span>
           {engine.lastCheckAt ? <> · last check {ago(engine.lastCheckAt, now)}</> : null}.
         </div>
+
+        <NearMeCard engine={engine} anchor={anchor} fires={fires} now={now} />
 
         <div className="px-3 pb-1 pt-3 font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">
           Alerts · newest first

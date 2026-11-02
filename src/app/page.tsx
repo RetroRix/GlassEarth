@@ -3718,6 +3718,7 @@ export default function Dashboard() {
         <SmartAlertsPanel
           engine={smartAlerts}
           anchor={smartAnchor}
+          fires={Array.isArray(data.fires) ? data.fires : null}
           onClose={() => setShowSmartAlerts(false)}
           onLocate={(lat, lng) => { setShowSmartAlerts(false); setFlyToLocation({ lat, lng, zoom: 9, ts: Date.now() }); }}
         />
