@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, useReducer, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, AudioLines, Dices, Home, ArrowLeft, Pin, PinOff, Telescope } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Satellite, Moon, Sun, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, Orbit, LayoutGrid, Tv, Plane, RadioTower, AudioLines, Dices, Home, ArrowLeft, Pin, PinOff, Telescope, Bell } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
 import { pickRouletteCamera, rouletteControlState, shouldShowRouletteFab, type WallCamera } from '@/lib/theater-wall';
@@ -50,6 +50,7 @@ import PlaneSpottingPanel from '@/components/PlaneSpottingPanel';
 import StationsPanel from '@/components/StationsPanel';
 import LaunchesPanel from '@/components/LaunchesPanel';
 import LookUpPanel from '@/components/LookUpPanel';
+import SmartAlertsPanel, { useSmartAlertsEngine } from '@/components/SmartAlertsPanel';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
 import RadioTuner from '@/components/RadioTuner';
 import MissionsCard from '@/components/MissionsCard';
@@ -287,6 +288,7 @@ export default function Dashboard() {
   const [radioStation, setRadioStation] = useState<RadioStation | null>(null);
   const [showTuner, setShowTuner] = useState(false);
   const [showLookUp, setShowLookUp] = useState(false);
+  const [showSmartAlerts, setShowSmartAlerts] = useState(false);
   /* Dead-stream reports from the one playback owner — the Radio Tuner
      listens and auto-skips; nothing else consumes this. */
   const [radioFailure, setRadioFailure] = useState<{ uuid: string; at: number } | null>(null);
@@ -742,6 +744,19 @@ export default function Dashboard() {
     return Object.keys(status).length ? status : undefined;
   }, [transitStatus, trafficSimStatus, flightsStatus, maritimeStatus]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
+  /* ── Smart alerts (pipeline #5) — the engine runs at page level so alerts
+     collect whether or not the panel is open. Its anchor prefers the
+     visitor's located position, then the opening geo, then the map centre,
+     and the label says which one "near you" currently means. */
+  const smartAnchor = liveLocation
+    ? { lat: liveLocation.lat, lng: liveLocation.lng, label: 'your area' }
+    : geoRef.current
+      ? { lat: geoRef.current.lat, lng: geoRef.current.lng, label: geoRef.current.city ? `your area (${geoRef.current.city})` : 'your area' }
+      : mapCenter
+        ? { lat: mapCenter.lat, lng: mapCenter.lng, label: 'the map centre' }
+        : null;
+  const smartAlerts = useSmartAlertsEngine(smartAnchor);
+  const openSmartAlerts = useCallback(() => { setShowSmartAlerts(true); smartAlerts.markSeen(); }, [smartAlerts]);
   /* The viewport bounds as a ref: the maritime poll reads them on its own
      cadence, long after the render that produced them. */
   const mapBoundsRef = useRef<{ west: number; south: number; east: number; north: number } | null>(null);
@@ -787,7 +802,7 @@ export default function Dashboard() {
     riding: cockpitState.status === 'riding',
     panelOpen:
       showSpaceCam || showWall || showTv || showTvWall || showStations || showTuner ||
-      showSpotting || showLookUp || showMarkets || showAlerts || showOi || showDrawing ||
+      showSpotting || showLookUp || showSmartAlerts || showMarkets || showAlerts || showOi || showDrawing ||
       showDirections || showDesktopSearch || showArcGIS || showRemote ||
       shareOpen,
   });
@@ -2843,7 +2858,7 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} /></div>}
+      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} onOpenSmartAlerts={openSmartAlerts} smartAlertsUnread={smartAlerts.unread} /></div>}
 
 
 
@@ -2976,6 +2991,16 @@ export default function Dashboard() {
             <Telescope className={`w-4 h-4 ${showLookUp ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
           </button>
           <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">LOOK UP!</span>
+        </div>
+
+        <div className="relative group">
+          <button onClick={() => { if (!showSmartAlerts) openSmartAlerts(); setShowSmartAlerts(!showSmartAlerts); setShowLookUp(false); setShowSpotting(false); setShowTuner(false); setShowStations(false); setShowTv(false); setShowSpaceCam(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showSmartAlerts ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Smart Alerts — quakes near you, ISS passes and launches" aria-label="Smart Alerts" aria-expanded={showSmartAlerts}>
+            <Bell className={`w-4 h-4 ${showSmartAlerts ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+            {smartAlerts.unread > 0 && !showSmartAlerts && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#FF7043] px-0.5 font-mono text-[8px] font-bold text-black">{smartAlerts.unread}</span>
+            )}
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">SMART ALERTS</span>
         </div>
 
         <div ref={marketsAnchor} className="relative group">
@@ -3428,7 +3453,7 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'9px'}}>NUC</div><div className="hud-value text-[10px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} />
+                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} onOpenSmartAlerts={() => { setMobilePanel(null); openSmartAlerts(); }} smartAlertsUnread={smartAlerts.unread} />
                       <div className="mt-8">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       </div>
@@ -3670,6 +3695,17 @@ export default function Dashboard() {
           onFocusFlight={focusFlightFromPanel}
           onFocusSatellite={focusSatelliteFromPanel}
           onRefreshFeeds={refreshOverheadFeeds}
+        />
+      )}
+
+      {/* ── Smart Alerts panel — the engine above does the checking; this
+          is its list + settings surface ── */}
+      {showSmartAlerts && (
+        <SmartAlertsPanel
+          engine={smartAlerts}
+          anchor={smartAnchor}
+          onClose={() => setShowSmartAlerts(false)}
+          onLocate={(lat, lng) => { setShowSmartAlerts(false); setFlyToLocation({ lat, lng, zoom: 9, ts: Date.now() }); }}
         />
       )}
 

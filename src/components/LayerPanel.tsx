@@ -6,7 +6,7 @@ import {
   Plane, Satellite, Sun, Moon, AlertTriangle, Camera,
   CloudLightning, CloudSun, Ship, Network, Database, Ghost,
   Flame, Tv, Radio, Mountain, Anchor, Megaphone, SlidersHorizontal, Bus,
-  Pin, PinOff, ListChecks, Telescope
+  Pin, PinOff, ListChecks, Telescope, Bell
 } from 'lucide-react';
 import StyleStudio from './StyleStudio';
 import BarEdgeHandle from './BarEdgeHandle';
@@ -40,6 +40,11 @@ interface LayerPanelProps {
   /** Opens the Look Up panel — next ISS passes and what is overhead the
    *  anchor right now. */
   onOpenLookUp?: () => void;
+  /** Opens the Smart Alerts panel — quakes near the visitor, ISS passes and
+   *  launches, checked by the page-level alert engine. */
+  onOpenSmartAlerts?: () => void;
+  /** Unread smart-alert count, badged on the Smart Alerts entries. */
+  smartAlertsUnread?: number;
 }
 
 interface LayerDef {
@@ -238,7 +243,7 @@ function SubLayerStem() {
   );
 }
 
-function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false, onOpenMissions, onOpenLookUp }: LayerPanelProps) {
+function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false, onOpenMissions, onOpenLookUp, onOpenSmartAlerts, smartAlertsUnread = 0 }: LayerPanelProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   /**
    * A pinned group stays open when the pointer leaves. Hover-only flyouts are
@@ -351,6 +356,23 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
               <span className="block text-[11px] font-mono uppercase tracking-wider text-[var(--lp-fg-strong)]">Look Up!</span>
               <span className="mt-0.5 block text-[9px] text-[var(--lp-fg-faint)]">Next ISS passes, satellites and aircraft overhead right now</span>
             </span>
+          </button>
+        )}
+        {onOpenSmartAlerts && (
+          <button
+            onClick={onOpenSmartAlerts}
+            className="flex w-full items-center gap-3 rounded-md border border-[var(--lp-border)] px-2 py-2.5 text-left hover:bg-[var(--lp-hover)] transition-colors"
+          >
+            <Bell className="h-4 w-4 shrink-0" style={{ color: 'var(--gold-primary)' }} />
+            <span className="flex-1">
+              <span className="block text-[11px] font-mono uppercase tracking-wider text-[var(--lp-fg-strong)]">Smart Alerts</span>
+              <span className="mt-0.5 block text-[9px] text-[var(--lp-fg-faint)]">Quakes near you, ISS passes and launches — checked while you watch</span>
+            </span>
+            {smartAlertsUnread > 0 && (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FF7043] px-1 font-mono text-[9px] font-bold text-black">
+                {smartAlertsUnread}
+              </span>
+            )}
           </button>
         )}
         {visibleGroups.map((group) => (
@@ -682,6 +704,26 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
             className="transition-all duration-500"
             style={{ width: 15, height: 15, color: 'rgba(255,255,255,0.35)' }}
           />
+        </button>
+      )}
+
+      {/* Smart Alerts — the page-level engine's panel, badged when unread. */}
+      {onOpenSmartAlerts && (
+        <button
+          onClick={onOpenSmartAlerts}
+          className="relative w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-500 cursor-pointer"
+          title="Smart Alerts — quakes near you, ISS passes and launches"
+          aria-label="Open Smart Alerts"
+        >
+          <Bell
+            className="transition-all duration-500"
+            style={{ width: 15, height: 15, color: smartAlertsUnread > 0 ? '#FFD54F' : 'rgba(255,255,255,0.35)' }}
+          />
+          {smartAlertsUnread > 0 && (
+            <span className="absolute right-1.5 top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#FF7043] px-0.5 font-mono text-[8px] font-bold text-black">
+              {smartAlertsUnread}
+            </span>
+          )}
         </button>
       )}
 
