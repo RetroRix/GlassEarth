@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Bell, BellRing, Rocket, Satellite, X } from 'lucide-react';
+import { Activity, Bell, BellRing, Plane, Rocket, Satellite, X } from 'lucide-react';
 import {
   applyFired, evaluateIssPasses, evaluateLaunches, evaluateQuakes,
   loadSmartAlertsRecord, newAlerts, saveSmartAlertsRecord, unreadCount,
@@ -9,6 +9,7 @@ import {
   type SmartAlert, type SmartAlertPrefs, type SmartAlertsRecord,
 } from '@/lib/smart-alerts';
 import { rateNearMe, type HeatLike } from '@/lib/near-me';
+import { evaluateNotableAircraft, type FlightLike } from '@/lib/notable-aircraft';
 
 const ISS_NORAD = '25544';
 const CHECK_EVERY_MS = 5 * 60_000;
@@ -118,6 +119,21 @@ export function useSmartAlertsEngine(anchor: Anchor | null): SmartAlertsEngine {
           })
           .catch(() => { /* as above */ }),
       );
+      if (p.aircraftEnabled) {
+        jobs.push(
+          fetch('/api/flights', { signal: AbortSignal.timeout(15_000) })
+            .then(r => (r.ok ? r.json() : null))
+            .then(d => {
+              if (!d) return;
+              const rows: FlightLike[] = [];
+              for (const key of ['commercial_flights', 'private_flights', 'private_jets', 'military_flights']) {
+                if (Array.isArray(d[key])) rows.push(...d[key]);
+              }
+              if (rows.length) candidates.push(...evaluateNotableAircraft(rows, now));
+            })
+            .catch(() => { /* as above — a silent feed simply spots nothing */ }),
+        );
+      }
 
       await Promise.all(jobs);
       setFeeds(snap);
@@ -187,12 +203,14 @@ const KIND_ICON = {
   quake: Activity,
   iss: Satellite,
   launch: Rocket,
+  aircraft: Plane,
 } as const;
 
 const KIND_COLOR = {
   quake: '#FF7043',
   iss: '#7DD3FC',
   launch: '#FF6D00',
+  aircraft: '#B39DDB',
 } as const;
 
 function ago(at: number, now: number): string {
@@ -415,6 +433,14 @@ export default function SmartAlertsPanel({ engine, anchor, fires = null, onClose
             <Choice label="Alert when NET is within" value={prefs.launchWithinHours} onChange={v => engine.updatePrefs({ launchWithinHours: v })}
               options={[6, 12, 24, 48].map(v => ({ value: v, label: `${v} h` }))} />
           )}
+          <Toggle on={prefs.aircraftEnabled} onClick={() => engine.updatePrefs({ aircraftEnabled: !prefs.aircraftEnabled })}
+            label="Notable aircraft" hint="E-4B, RC-135, B-52, B-2, tankers, Air Force One / SAM callsigns — spotted on the ADS-B feed" />
+          {prefs.aircraftEnabled && (
+            <p className="px-1 text-[9px] leading-relaxed text-white/40">
+              A sighting is just that — one aircraft broadcasting where the feed can hear it. Many such flights
+              never broadcast, or fly filtered: silence never means none are flying.
+            </p>
+          )}
           <div className="rounded border border-white/10 px-2 py-2">
             <div className="flex items-center gap-2">
               <BellRing className="h-3.5 w-3.5 text-white/60" />
@@ -445,7 +471,7 @@ export default function SmartAlertsPanel({ engine, anchor, fires = null, onClose
         </div>
 
         <div className="px-3 py-3 font-mono text-[9px] leading-relaxed text-white/30">
-          Sources: USGS earthquake feed · ISS pass times from the Look Up! route (CelesTrak elements, propagated server-side) · Launch Library 2 / The Space Devs. Settings and alert history live only in this browser.
+          Sources: USGS earthquake feed · ISS pass times from the Look Up! route (CelesTrak elements, propagated server-side) · Launch Library 2 / The Space Devs · aircraft as broadcast on the ADS-B feed (adsb.lol). Settings and alert history live only in this browser.
         </div>
       </div>
     </div>

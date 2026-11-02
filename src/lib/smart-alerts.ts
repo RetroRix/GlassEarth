@@ -37,6 +37,9 @@ export interface SmartAlertPrefs {
   launchesEnabled: boolean;
   /** Alert when a launch NET falls within this many hours. */
   launchWithinHours: number;
+  /** Alert when a watchlist aircraft (lib/notable-aircraft) is spotted
+      airborne on the flights feed. */
+  aircraftEnabled: boolean;
   /** Opt-in browser notifications for new alerts (permission asked separately). */
   notifications: boolean;
 }
@@ -50,10 +53,11 @@ export const DEFAULT_PREFS: SmartAlertPrefs = {
   issVisibleOnly: true,
   launchesEnabled: true,
   launchWithinHours: 24,
+  aircraftEnabled: true,
   notifications: false,
 };
 
-export type SmartAlertKind = 'quake' | 'iss' | 'launch';
+export type SmartAlertKind = 'quake' | 'iss' | 'launch' | 'aircraft';
 
 export interface SmartAlert {
   id: string;
@@ -104,6 +108,7 @@ function parsePrefs(raw: unknown): SmartAlertPrefs {
     issVisibleOnly: bool(r.issVisibleOnly, DEFAULT_PREFS.issVisibleOnly),
     launchesEnabled: bool(r.launchesEnabled, DEFAULT_PREFS.launchesEnabled),
     launchWithinHours: num(r.launchWithinHours, DEFAULT_PREFS.launchWithinHours, 1, 72),
+    aircraftEnabled: bool(r.aircraftEnabled, DEFAULT_PREFS.aircraftEnabled),
     notifications: bool(r.notifications, DEFAULT_PREFS.notifications),
   };
 }
