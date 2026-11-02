@@ -210,7 +210,7 @@ export function completeMission(
 export type MissionEvent =
   | { type: 'cockpit-started' }
   | { type: 'live-video-camera' }
-  | { type: 'radio-playing'; source: 'tuner' | 'stations' | null }
+  | { type: 'radio-playing'; source: 'tuner' | 'stations' | 'spin' | null }
   | { type: 'date-compare-swiped' }
   | { type: 'flight-watch-started' };
 

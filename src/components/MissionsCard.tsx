@@ -35,7 +35,7 @@ export interface MissionSignals {
   liveVideo: { cameraId: string; at: number } | null;
   /** The radio audio element started playing, with the source that chose
    *  the station — only a tuner landing completes the radio mission. */
-  radioPlaying: { uuid: string; at: number; source: 'tuner' | 'stations' | null } | null;
+  radioPlaying: { uuid: string; at: number; source: 'tuner' | 'stations' | 'spin' | null } | null;
   /** The Date Compare divider moved under the visitor's hand. */
   dateCompareSwipedAt: number | null;
 }

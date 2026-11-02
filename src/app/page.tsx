@@ -299,11 +299,79 @@ export default function Dashboard() {
      Stations panel. The tuner mission cares about the difference, and
      the playback owner only knows that something is playing, so the
      attribution is kept here, where the choice is made. */
-  const radioSourceRef = useRef<'tuner' | 'stations' | null>(null);
-  const playRadio = useCallback((station: RadioStation, source: 'tuner' | 'stations') => {
+  const radioSourceRef = useRef<'tuner' | 'stations' | 'spin' | null>(null);
+  const playRadio = useCallback((station: RadioStation, source: 'tuner' | 'stations' | 'spin') => {
     radioSourceRef.current = source;
     setRadioStation(station);
   }, []);
+
+  /* ── Spin-to-tune (Orbe Radio scout, 2D form, 2026-11-02) ──
+     A radio mode: settle the map somewhere and the radio retunes to the
+     nearest playable station to the new centre, over the same mode=near
+     plumbing Listen to this place uses — coordinate-bearing, https-only,
+     ranked by true distance, with the same 250 km honesty cap. When
+     nothing is in range the mode says so instead of reaching further.
+     The mode is toggled from the Radio Tuner; playback still goes
+     through the one audio owner. 2D only — the 3D globe form is parked
+     with the rest of 3D. */
+  const [spinToTune, setSpinToTune] = useState(false);
+  const [spinNotice, setSpinNotice] = useState<string | null>(null);
+  const spinCandidatesRef = useRef<{ key: string; list: { station: RadioStation; distanceKm: number }[]; index: number } | null>(null);
+  const spinCentreKeyRef = useRef('');
+  const radioUuidRef = useRef<string | null>(null);
+  useEffect(() => { radioUuidRef.current = radioStation?.uuid ?? null; }, [radioStation]);
+
+  const spinRetune = useCallback(async (lat: number, lng: number, key: string) => {
+    try {
+      const res = await fetch(`/api/stations/radio?mode=near&lat=${lat}&lng=${lng}&limit=8`, { signal: AbortSignal.timeout(20_000) });
+      const d = res.ok ? await res.json() : null;
+      const list = (Array.isArray(d?.stations) ? d.stations : [])
+        .map((st: RadioStation & { distanceKm?: number }) => ({ station: st, distanceKm: typeof st.distanceKm === 'number' ? st.distanceKm : Number.POSITIVE_INFINITY }))
+        .filter((n: { distanceKm: number }) => n.distanceKm <= 250);
+      if (!list.length) {
+        spinCandidatesRef.current = null;
+        setSpinNotice('SPIN-TO-TUNE — no station within 250 km of here. Drag the map somewhere livelier.');
+        return;
+      }
+      spinCandidatesRef.current = { key, list, index: 0 };
+      const first: { station: RadioStation; distanceKm: number } = list[0];
+      if (first.station.uuid === radioUuidRef.current) return; // already playing the nearest — nothing to do
+      playRadio(first.station, 'spin');
+      setSpinNotice(`SPIN-TO-TUNE — ${first.station.name} · ${Math.round(first.distanceKm)} km from the map centre`);
+    } catch {
+      setSpinNotice('SPIN-TO-TUNE — the radio directory did not answer for this spot.');
+    }
+  }, [playRadio]);
+
+  /* The settle effect that reads mapCenter lives further down, beside
+     the Smart Alerts engine (mapCenter is declared later in the page).
+
+  /* Dead-stream walk for spin's own stations only: name the dead one,
+     step to the next-nearest candidate for the same centre. */
+  useEffect(() => {
+    if (!spinToTune || !radioFailure) return;
+    const active = spinCandidatesRef.current;
+    if (!active || active.key !== spinCentreKeyRef.current) return;
+    const current = active.list[active.index];
+    if (!current || current.station.uuid !== radioFailure.uuid) return;
+    const nextIndex = active.index + 1;
+    if (nextIndex >= active.list.length) {
+      spinCandidatesRef.current = null;
+      setSpinNotice(`SPIN-TO-TUNE — ${current.station.name} did not answer, and no other playable station is near here.`);
+      return;
+    }
+    active.index = nextIndex;
+    const next = active.list[nextIndex];
+    playRadio(next.station, 'spin');
+    setSpinNotice(`SPIN-TO-TUNE — ${current.station.name} did not answer; trying ${next.station.name} · ${Math.round(next.distanceKm)} km away`);
+  }, [spinToTune, radioFailure, playRadio]);
+
+  /* Notices are transient — long enough to read, then gone. */
+  useEffect(() => {
+    if (!spinNotice) return;
+    const t = setTimeout(() => setSpinNotice(null), 8000);
+    return () => clearTimeout(t);
+  }, [spinNotice]);
 
   /* ── First-run missions (lib/missions) ──
      The card owns the progress record; this page owns the real events.
@@ -314,7 +382,7 @@ export default function Dashboard() {
      own watched list size and cockpit state, passed as props below. */
   const [missionsOpenSignal, setMissionsOpenSignal] = useState(0);
   const [missionLiveVideo, setMissionLiveVideo] = useState<{ cameraId: string; at: number } | null>(null);
-  const [missionRadioPlaying, setMissionRadioPlaying] = useState<{ uuid: string; at: number; source: 'tuner' | 'stations' | null } | null>(null);
+  const [missionRadioPlaying, setMissionRadioPlaying] = useState<{ uuid: string; at: number; source: 'tuner' | 'stations' | 'spin' | null } | null>(null);
   const [missionCompareSwipedAt, setMissionCompareSwipedAt] = useState<number | null>(null);
   const handleMissionLiveVideo = useCallback((cam: any) => {
     setMissionLiveVideo({ cameraId: String(cam?.id ?? ''), at: Date.now() });
@@ -759,6 +827,20 @@ export default function Dashboard() {
         ? { lat: mapCenter.lat, lng: mapCenter.lng, label: 'the map centre' }
         : null;
   const smartAlerts = useSmartAlertsEngine(smartAnchor);
+
+  /* Spin-to-tune settle effect: when the mode is on, the centre must
+     hold still briefly and actually change (rounded to ~1 km) before a
+     new nearest-station lookup fires. */
+  useEffect(() => {
+    if (!spinToTune || !mapCenter) return;
+    const key = `${mapCenter.lat.toFixed(2)},${mapCenter.lng.toFixed(2)}`;
+    if (key === spinCentreKeyRef.current) return;
+    const t = setTimeout(() => {
+      spinCentreKeyRef.current = key;
+      void spinRetune(mapCenter.lat, mapCenter.lng, key);
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [spinToTune, mapCenter, spinRetune]);
   const openSmartAlerts = useCallback(() => { setShowSmartAlerts(true); smartAlerts.markSeen(); }, [smartAlerts]);
   /* The viewport bounds as a ref: the maritime poll reads them on its own
      cadence, long after the render that produced them. */
@@ -3676,7 +3758,22 @@ export default function Dashboard() {
           onFlyTo={(lat, lng, zoom, duration) => setFlyToLocation({ lat, lng, zoom, duration, ts: Date.now() })}
           currentRadioUuid={radioStation?.uuid ?? null}
           failureSignal={radioFailure}
+          spinToTune={spinToTune}
+          onSpinToTuneChange={(on) => {
+            setSpinToTune(on);
+            if (!on) { spinCandidatesRef.current = null; spinCentreKeyRef.current = ''; setSpinNotice(null); }
+          }}
         />
+      )}
+
+      {/* ── Spin-to-tune notice — transient word from the mode, above the
+          mini-player ── */}
+      {spinToTune && spinNotice && (
+        <div className="fixed bottom-36 left-1/2 z-[936] w-[min(520px,calc(100vw-16px))] -translate-x-1/2 md:bottom-28">
+          <div className="border border-[#00E5FF]/30 bg-[#0a0a0a]/95 px-3 py-2 text-center font-mono text-[9px] uppercase leading-relaxed tracking-wider text-[#A5F3FC] shadow-2xl">
+            {spinNotice}
+          </div>
+        </div>
       )}
 
       {/* ── Radio now-playing bar — page-level so it survives the panel ── */}

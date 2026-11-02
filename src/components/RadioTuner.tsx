@@ -46,11 +46,15 @@ interface RadioTunerProps {
   currentRadioUuid: string | null;
   /** The playback owner's dead-stream report: { uuid, at } per failure. */
   failureSignal: { uuid: string; at: number } | null;
+  /** Spin-to-tune mode (owned by the page, which watches the map): when
+      on, settling the map retunes the radio to the new centre. */
+  spinToTune?: boolean;
+  onSpinToTuneChange?: (on: boolean) => void;
 }
 
 const btn = 'rounded-sm border border-white/15 p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent';
 
-export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadioUuid, failureSignal }: RadioTunerProps) {
+export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadioUuid, failureSignal, spinToTune = false, onSpinToTuneChange }: RadioTunerProps) {
   const [dial, setDial] = useState<DialStation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [index, setIndex] = useState(-1);
@@ -250,10 +254,18 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
                 : 'No stations on the dial'}
           </span>
           <button
-            onClick={() => setScanOn(v => !v)}
+            onClick={() => { const next = !spinToTune; if (next) setScanOn(false); onSpinToTuneChange?.(next); }}
+            aria-pressed={spinToTune}
+            className={`ml-auto rounded-sm border px-2 py-1.5 font-mono text-[9px] font-bold tracking-[0.2em] transition-colors ${spinToTune ? 'border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'}`}
+            title="Spin-to-tune — settle the map somewhere and the radio retunes to the nearest station there"
+          >
+            SPIN
+          </button>
+          <button
+            onClick={() => { const next = !scanOn; setScanOn(next); if (next) onSpinToTuneChange?.(false); }}
             disabled={!dial?.length}
             aria-pressed={scanOn}
-            className={`ml-auto rounded-sm border px-2 py-1.5 font-mono text-[9px] font-bold tracking-[0.2em] transition-colors disabled:opacity-30 ${scanOn ? 'border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'}`}
+            className={`rounded-sm border px-2 py-1.5 font-mono text-[9px] font-bold tracking-[0.2em] transition-colors disabled:opacity-30 ${scanOn ? 'border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]' : 'border-white/15 text-white/60 hover:bg-white/10 hover:text-white'}`}
             title="Scan — play each station for 15 seconds, then move on; dead streams skip themselves"
           >
             SCAN
@@ -294,6 +306,11 @@ export default function RadioTuner({ onClose, onPlayRadio, onFlyTo, currentRadio
             )}
             {notice && (
               <div className="mt-0.5 truncate font-mono text-[8px] uppercase tracking-wider text-amber-300/90">{notice}</div>
+            )}
+            {spinToTune && (
+              <div className="mt-0.5 truncate font-mono text-[8px] uppercase tracking-wider text-[#00E5FF]/80">
+                Spin-to-tune on — settle the map somewhere and the radio retunes to that place
+              </div>
             )}
           </div>
           {shown && !scanning && (
