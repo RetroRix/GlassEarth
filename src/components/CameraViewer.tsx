@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ExternalLink, RefreshCw, MapPin, Camera, CameraOff, Maximize2, PlayCircle } from 'lucide-react';
+import { X, ExternalLink, RefreshCw, MapPin, Camera, CameraOff, Maximize2, PlayCircle, Headphones } from 'lucide-react';
 import Hls from 'hls.js';
 import { isHostedOffPlatform, liveFeedAtSource, localEmbed, needsResolution, offPlatformView } from '@/lib/camera-feed';
+import type { RadioStation } from '@/lib/stations';
 import { clearLook, registerVideo } from '@/lib/vision/store';
 import { clearStreamDead, deriveFeedBadge, isStreamDead, markStreamDead, type BadgeMediaKind } from '@/lib/feed-badge';
 import { usePlaceholder } from '@/lib/placeholder-check';
@@ -20,9 +21,24 @@ interface CameraViewerProps {
   besideOi?: boolean;
   /** Fired once per opening when the viewer's own badge first reads LIVE VIDEO — a stream is actually playing. Opening the viewer, or opening a snapshot camera, never fires it. */
   onLiveVideo?: (camera: any) => void;
+  /** Listen to this place (pipeline #15): hand a station to the page's
+   *  single radio playback owner — the viewer never plays audio itself. */
+  onPlayRadio?: (station: RadioStation) => void;
+  /** Dead-stream reports from the playback owner (the same signal the
+   *  Radio Tuner consumes). When the dead station is one this viewer
+   *  started, it auto-skips to the next-nearest, naming the dead one. */
+  radioFailure?: { uuid: string; at: number } | null;
 }
 
-export default function CameraViewer({ camera, onClose, onLocate, besideOi = false, onLiveVideo }: CameraViewerProps) {
+/** Listen-to-this-place state for one camera opening (pipeline #15). */
+type PlaceRadio =
+  | { camId: string; phase: 'searching' }
+  | { camId: string; phase: 'playing'; station: RadioStation; distanceKm: number; skipped: string[] }
+  | { camId: string; phase: 'none' }
+  | { camId: string; phase: 'unavailable' }
+  | { camId: string; phase: 'exhausted'; lastSkipped: string };
+
+export default function CameraViewer({ camera, onClose, onLocate, besideOi = false, onLiveVideo, onPlayRadio, radioFailure }: CameraViewerProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -51,6 +67,65 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
     }, 1000);
     return () => clearInterval(iv);
   }, []);
+
+  /* ── Listen to this place (pipeline #15) ──
+     Pair this camera with its local radio: the route ranks Radio Browser's
+     coordinate-bearing stations by real distance; playback goes through
+     the page's single audio owner (onPlayRadio), never a private element
+     here. A station the owner reports dead is named and skipped to the
+     next-nearest, the way the Radio Tuner skips dead dial stops. */
+  const [placeRadio, setPlaceRadio] = useState<PlaceRadio | null>(null);
+  const placeCandidatesRef = useRef<{ camId: string; list: { station: RadioStation; distanceKm: number }[]; index: number } | null>(null);
+  const PLACE_RADIO_MAX_KM = 250;
+
+  const startPlaceRadio = async () => {
+    if (!camera || !onPlayRadio || camera.lat == null || camera.lng == null) return;
+    const camId = String(camera.id);
+    setPlaceRadio({ camId, phase: 'searching' });
+    try {
+      const res = await fetch(`/api/stations/radio?mode=near&lat=${camera.lat}&lng=${camera.lng}&limit=8`, { signal: AbortSignal.timeout(20_000) });
+      const data = res.ok ? await res.json() : null;
+      const list = (Array.isArray(data?.stations) ? data.stations : [])
+        .map((st: RadioStation & { distanceKm?: number }) => ({ station: st, distanceKm: typeof st.distanceKm === 'number' ? st.distanceKm : Number.POSITIVE_INFINITY }))
+        .filter((n: { distanceKm: number }) => n.distanceKm <= PLACE_RADIO_MAX_KM);
+      if (!list.length) {
+        placeCandidatesRef.current = null;
+        setPlaceRadio({ camId, phase: 'none' });
+        return;
+      }
+      placeCandidatesRef.current = { camId, list, index: 0 };
+      setPlaceRadio({ camId, phase: 'playing', station: list[0].station, distanceKm: list[0].distanceKm, skipped: [] });
+      onPlayRadio(list[0].station);
+    } catch {
+      setPlaceRadio({ camId, phase: 'unavailable' });
+    }
+  };
+
+  /* Auto-skip: reacts only to the failure of the exact station this viewer
+     started, for the camera currently open. */
+  useEffect(() => {
+    if (!radioFailure || !onPlayRadio || !camera) return;
+    const active = placeCandidatesRef.current;
+    if (!active || active.camId !== String(camera.id)) return;
+    const current = active.list[active.index];
+    if (!current || current.station.uuid !== radioFailure.uuid) return;
+    const skippedName = current.station.name;
+    const nextIndex = active.index + 1;
+    if (nextIndex >= active.list.length) {
+      placeCandidatesRef.current = null;
+      setPlaceRadio({ camId: active.camId, phase: 'exhausted', lastSkipped: skippedName });
+      return;
+    }
+    active.index = nextIndex;
+    const next = active.list[nextIndex];
+    setPlaceRadio(prev => ({
+      camId: active.camId, phase: 'playing', station: next.station, distanceKm: next.distanceKm,
+      skipped: [...(prev && prev.camId === active.camId && prev.phase === 'playing' ? prev.skipped : []), skippedName],
+    }));
+    onPlayRadio(next.station);
+  }, [radioFailure, camera, onPlayRadio]);
+
+  const placeRadioView = placeRadio && camera && placeRadio.camId === String(camera.id) ? placeRadio : null;
 
   const camId = camera ? `CAM-${Math.abs(camera.lat * 10000).toFixed(0).padStart(4, '0').slice(-4)}-${Math.abs(camera.lng * 10000).toFixed(0).padStart(4, '0').slice(-4)}` : 'UNKNOWN';
 
@@ -487,12 +562,28 @@ export default function CameraViewer({ camera, onClose, onLocate, besideOi = fal
                     <ExternalLink className="w-2.5 h-2.5" /> RAW FEED
                   </a>
                 )}
+                {onPlayRadio && camera.lat && camera.lng && (
+                  <button onClick={startPlaceRadio} className="flex items-center gap-1.5 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-[9px] font-mono text-[var(--gold-primary)] tracking-widest" title="Play this place's local radio (Radio Browser)">
+                    <Headphones className="w-2.5 h-2.5" /> LISTEN TO THIS PLACE
+                  </button>
+                )}
                 <a href={`https://www.google.com/maps/@${camera.lat},${camera.lng},17z`} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-[9px] font-mono text-[var(--cyan-primary)] tracking-widest">
                   <MapPin className="w-2.5 h-2.5" /> MAP TARGET
                 </a>
               </div>
             </div>
+            {placeRadioView && (
+              <div className="px-3 py-1.5 border-b border-white/5 text-[9px] font-mono tracking-wider text-[var(--text-secondary)]">
+                {placeRadioView.phase === 'searching' && 'FINDING THIS PLACE’S RADIO…'}
+                {placeRadioView.phase === 'playing' && (
+                  <>PLAYING {placeRadioView.station.name.toUpperCase()} · {placeRadioView.distanceKm < 10 ? placeRadioView.distanceKm.toFixed(1) : Math.round(placeRadioView.distanceKm)} KM FROM THIS CAMERA · VIA RADIO BROWSER{placeRadioView.skipped.length > 0 ? ` · SKIPPED DEAD: ${placeRadioView.skipped.join(', ').toUpperCase()}` : ''} — STOP FROM THE RADIO BAR</>
+                )}
+                {placeRadioView.phase === 'none' && 'NO RADIO STATION WITH PUBLISHED COORDINATES WITHIN 250 KM OF THIS CAMERA (RADIO BROWSER’S GEO POOL)'}
+                {placeRadioView.phase === 'unavailable' && 'THE RADIO DIRECTORY DIDN’T ANSWER — TRY AGAIN IN A MOMENT'}
+                {placeRadioView.phase === 'exhausted' && `${placeRadioView.lastSkipped.toUpperCase()} ISN’T PLAYING EITHER — NO MORE NEARBY STATIONS TO TRY`}
+              </div>
+            )}
             {/* Animated data stream bar */}
             <div className="h-[2px] w-full bg-[var(--border-primary)] overflow-hidden relative">
               <div className="absolute top-0 bottom-0 left-0 bg-[var(--gold-primary)] shadow-[0_0_8px_var(--gold-primary)] w-1/3 animate-pulse" style={{ animation: 'progress-glow-slide 2s cubic-bezier(0.4, 0, 0.2, 1) infinite' }} />

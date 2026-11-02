@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   RADIO_FAVORITES_KEY, TV_FAVORITES_KEY, isMixedContent, loadRadioFavorites,
-  loadTvFavorites, newsFirst, normalizeRadioStation, normalizeRadioStations,
+  loadTvFavorites, nearestStations, newsFirst, normalizeRadioStation, normalizeRadioStations,
   parseM3u, saveRadioFavorites, saveTvFavorites, type RadioStation, type TvChannel,
 } from './stations';
 
@@ -124,5 +124,30 @@ describe('favourites persistence', () => {
     vi.stubGlobal('localStorage', { getItem: () => '{not json', setItem: () => {}, removeItem: () => {} });
     expect(loadTvFavorites()).toEqual([]);
     expect(loadRadioFavorites()).toEqual([]);
+  });
+});
+
+describe('nearestStations (Listen to this place)', () => {
+  const station = (uuid: string, lat?: number, lng?: number): RadioStation => ({
+    uuid, name: uuid, country: '', state: '', tags: '', bitrate: 0, codec: '',
+    favicon: '', url: 'https://example.test/stream', votes: 0,
+    ...(lat !== undefined && lng !== undefined ? { lat, lng } : {}),
+  });
+
+  it('ranks by real distance and drops coordinate-less stations', () => {
+    const out = nearestStations([
+      station('far', 32.31, -106.78),      // Las Cruces — ~65 km from El Paso
+      station('near', 31.78, -106.44),     // El Paso — a few km
+      station('no-coords'),
+    ], 31.76, -106.49);
+    expect(out.map(n => n.station.uuid)).toEqual(['near', 'far']);
+    expect(out[0].distanceKm).toBeLessThan(10);
+    expect(out[1].distanceKm).toBeGreaterThan(50);
+  });
+
+  it('honours the limit and an empty pool', () => {
+    const many = Array.from({ length: 12 }, (_, i) => station(`s${i}`, 31.76 + i * 0.1, -106.49));
+    expect(nearestStations(many, 31.76, -106.49, 3)).toHaveLength(3);
+    expect(nearestStations([], 31.76, -106.49)).toEqual([]);
   });
 });

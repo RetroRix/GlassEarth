@@ -292,7 +292,8 @@ export default function Dashboard() {
   const [showSmartAlerts, setShowSmartAlerts] = useState(false);
   const [showSunriseChaser, setShowSunriseChaser] = useState(false);
   /* Dead-stream reports from the one playback owner — the Radio Tuner
-     listens and auto-skips; nothing else consumes this. */
+     listens and auto-skips; the camera viewer's Listen to this place
+     consumes it too, for its own stations only. */
   const [radioFailure, setRadioFailure] = useState<{ uuid: string; at: number } | null>(null);
   /* Which surface chose the station now playing — the tuner dial or the
      Stations panel. The tuner mission cares about the difference, and
@@ -3595,6 +3596,8 @@ export default function Dashboard() {
         onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
         besideOi={showOi && !oiTheater}
         onLiveVideo={handleMissionLiveVideo}
+        onPlayRadio={(station) => playRadio(station, 'stations')}
+        radioFailure={radioFailure}
       />
 
       {/* ── Camera Theater + Ambient TV ──

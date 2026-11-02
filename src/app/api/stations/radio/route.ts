@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeRadioStations } from '@/lib/stations';
+import { isMixedContent, nearestStations, normalizeRadioStations } from '@/lib/stations';
 
 /**
  * Glass Earth — radio stations directory (Radio Browser).
@@ -81,6 +81,21 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Math.max(parseInt(params.get('limit') ?? '60', 10) || 60, 1), 200);
   const common = 'hidebroken=true';
 
+  /* "Listen to this place" (pipeline #15): the coordinate-bearing pool,
+     ranked by real distance to the requested point. */
+  let nearAnchor: { lat: number; lng: number } | null = null;
+  if (mode === 'near') {
+    const lat = parseFloat(params.get('lat') ?? '');
+    const lng = parseFloat(params.get('lng') ?? '');
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return NextResponse.json(
+        { stations: [], total: 0, mode, error: 'numeric lat/lng required' },
+        { status: 400, headers: CACHE_HEADERS },
+      );
+    }
+    nearAnchor = { lat, lng };
+  }
+
   let path: string;
   switch (mode) {
     case 'country':
@@ -98,9 +113,11 @@ export async function GET(req: NextRequest) {
       path = `stations/search?name=${encodeURIComponent(q)}&${common}&order=votes&reverse=true&limit=${limit}`;
       break;
     case 'tuner':
+    case 'near':
       /* The Radio Tuner dial needs the widest coordinate-bearing pool the
          directory offers: the top-voted 6,000 (the geo filter below cuts
-         it to the stations that actually carry coordinates). */
+         it to the stations that actually carry coordinates). "near" ranks
+         the same pool by distance to its anchor instead. */
       path = `stations/topvote/6000?${common}`;
       break;
     case 'top':
@@ -111,6 +128,21 @@ export async function GET(req: NextRequest) {
 
   try {
     const all = normalizeRadioStations(await radioFetch(path));
+    if (mode === 'near' && nearAnchor) {
+      /* Playable-from-here only: coordinate-bearing, and not an http
+         stream this https app's browser would refuse outright. */
+      const pool = all.filter(s => s.lat !== undefined && s.lng !== undefined && !isMixedContent(s.url));
+      const nearLimit = Math.min(Math.max(parseInt(params.get('limit') ?? '8', 10) || 8, 1), 25);
+      const nearby = nearestStations(pool, nearAnchor.lat, nearAnchor.lng, nearLimit);
+      return NextResponse.json(
+        {
+          stations: nearby.map(n => ({ ...n.station, distanceKm: Math.round(n.distanceKm * 10) / 10 })),
+          total: nearby.length, mode, source: 'Radio Browser',
+          anchor: nearAnchor, timestamp: new Date().toISOString(),
+        },
+        { headers: CACHE_HEADERS },
+      );
+    }
     /* The dial is coordinate-bearing stations only; the panel modes keep
        the full slice (coordinate-less stations stay panel-playable). */
     const stations = mode === 'tuner'

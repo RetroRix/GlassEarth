@@ -16,6 +16,8 @@
  * node, following lib/theater-wall's example.
  */
 
+import { haversine } from './geo';
+
 // ── TV ──────────────────────────────────────────────────────────────────────
 
 export interface TvChannel {
@@ -248,6 +250,34 @@ export const RADIO_TAGS = [
     app those are mixed content and the browser will refuse them outright. */
 export function isMixedContent(url: string): boolean {
   return /^http:\/\//i.test(url);
+}
+
+export interface NearbyStation {
+  station: RadioStation;
+  distanceKm: number;
+}
+
+/**
+ * The stations nearest a place, closest first — the "Listen to this place"
+ * pairing (pipeline #15). Only stations that publish coordinates can be
+ * near anything; the rest stay panel-only, as the tuner already treats
+ * them. Distances are real great-circle kilometres (lib/geo), never
+ * estimates dressed up as measurements.
+ */
+export function nearestStations(
+  stations: RadioStation[],
+  lat: number,
+  lng: number,
+  limit = 8,
+): NearbyStation[] {
+  const out: NearbyStation[] = [];
+  for (const station of stations) {
+    if (station.lat === undefined || station.lng === undefined) continue;
+    if (!Number.isFinite(station.lat) || !Number.isFinite(station.lng)) continue;
+    out.push({ station, distanceKm: haversine([lng, lat], [station.lng, station.lat]) });
+  }
+  out.sort((a, b) => a.distanceKm - b.distanceKm);
+  return out.slice(0, Math.max(0, limit));
 }
 
 // ── TV wall ─────────────────────────────────────────────────────────────────
