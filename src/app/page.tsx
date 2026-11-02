@@ -51,6 +51,7 @@ import StationsPanel from '@/components/StationsPanel';
 import LaunchesPanel from '@/components/LaunchesPanel';
 import LookUpPanel from '@/components/LookUpPanel';
 import SmartAlertsPanel, { useSmartAlertsEngine } from '@/components/SmartAlertsPanel';
+import SunriseChaserPanel from '@/components/SunriseChaserPanel';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
 import RadioTuner from '@/components/RadioTuner';
 import MissionsCard from '@/components/MissionsCard';
@@ -289,6 +290,7 @@ export default function Dashboard() {
   const [showTuner, setShowTuner] = useState(false);
   const [showLookUp, setShowLookUp] = useState(false);
   const [showSmartAlerts, setShowSmartAlerts] = useState(false);
+  const [showSunriseChaser, setShowSunriseChaser] = useState(false);
   /* Dead-stream reports from the one playback owner — the Radio Tuner
      listens and auto-skips; nothing else consumes this. */
   const [radioFailure, setRadioFailure] = useState<{ uuid: string; at: number } | null>(null);
@@ -802,7 +804,7 @@ export default function Dashboard() {
     riding: cockpitState.status === 'riding',
     panelOpen:
       showSpaceCam || showWall || showTv || showTvWall || showStations || showTuner ||
-      showSpotting || showLookUp || showSmartAlerts || showMarkets || showAlerts || showOi || showDrawing ||
+      showSpotting || showLookUp || showSmartAlerts || showSunriseChaser || showMarkets || showAlerts || showOi || showDrawing ||
       showDirections || showDesktopSearch || showArcGIS || showRemote ||
       shareOpen,
   });
@@ -1595,6 +1597,15 @@ export default function Dashboard() {
     setFlyToLocation({ lat: Number(pick.lat), lng: Number(pick.lng), zoom: 13, duration: 2400, ts: Date.now() });
     setActiveCamera({ ...pick, type: 'cctv' });
   }, [activeCamera]);
+
+  /* ── SUNRISE CHASER (pipeline #14) — the panel's Watch and its ride use
+     the roulette's exact contract: fly to the camera, open it in the viewer. */
+  const watchSunriseCamera = useCallback((cam: WallCamera) => {
+    oiGlobe.current?.follow(false);
+    setActiveLayers(prev => (prev.cctv ? prev : { ...prev, cctv: true }));
+    setFlyToLocation({ lat: Number(cam.lat), lng: Number(cam.lng), zoom: 13, duration: 2400, ts: Date.now() });
+    setActiveCamera({ ...cam, type: 'cctv' });
+  }, []);
 
   /* The roulette control's state, shared by the desktop strip button and the
      mobile floating button: always the dice icon, visibly dimmed with a small
@@ -2858,7 +2869,7 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} onOpenSmartAlerts={openSmartAlerts} smartAlertsUnread={smartAlerts.unread} /></div>}
+      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} onOpenSmartAlerts={openSmartAlerts} smartAlertsUnread={smartAlerts.unread} onOpenSunriseChaser={() => setShowSunriseChaser(true)} /></div>}
 
 
 
@@ -3453,7 +3464,7 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'9px'}}>NUC</div><div className="hud-value text-[10px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} onOpenSmartAlerts={() => { setMobilePanel(null); openSmartAlerts(); }} smartAlertsUnread={smartAlerts.unread} />
+                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} onOpenSmartAlerts={() => { setMobilePanel(null); openSmartAlerts(); }} smartAlertsUnread={smartAlerts.unread} onOpenSunriseChaser={() => { setMobilePanel(null); setShowSunriseChaser(true); }} />
                       <div className="mt-8">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       </div>
@@ -3706,6 +3717,15 @@ export default function Dashboard() {
           anchor={smartAnchor}
           onClose={() => setShowSmartAlerts(false)}
           onLocate={(lat, lng) => { setShowSmartAlerts(false); setFlyToLocation({ lat, lng, zoom: 9, ts: Date.now() }); }}
+        />
+      )}
+
+      {/* ── Sunrise Chaser panel — dawn-line cameras + the ride ── */}
+      {showSunriseChaser && (
+        <SunriseChaserPanel
+          cameras={(data.cameras ?? []) as WallCamera[]}
+          onClose={() => setShowSunriseChaser(false)}
+          onWatch={watchSunriseCamera}
         />
       )}
 
