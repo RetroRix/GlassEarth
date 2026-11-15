@@ -151,6 +151,12 @@ export default function GlobalStatusBar({ revealed = true }: { revealed?: boolea
           >
             <span className="text-[9px] font-bold tracking-[0.15em] uppercase">Privacy</span>
           </Link>
+          {/* Plain-words help & troubleshooting */}
+          <Link href="/help" title="Help" aria-label="Help"
+            className="h-full px-3 hidden sm:flex items-center text-white/40 hover:text-white hover:bg-white/[0.04] border-r border-white/[0.04] transition-all duration-200"
+          >
+            <span className="text-[9px] font-bold tracking-[0.15em] uppercase">Help</span>
+          </Link>
         </div>
 
         {/* ── CENTER: Scrolling ticker ── */}
