@@ -14,9 +14,9 @@ describe('share view round-trip', () => {
     expect(decoded!.cameraId).toBe(view.cameraId);
   });
 
-  it('builds a URL on the origin root with the encoded params', () => {
+  it('builds a URL on the app route with the encoded params', () => {
     const url = buildShareUrl('https://www.glassearthlive.com', { lat: 10, lng: 20, zoom: 5 });
-    expect(url.startsWith('https://www.glassearthlive.com/?')).toBe(true);
+    expect(url.startsWith('https://www.glassearthlive.com/app?')).toBe(true);
     expect(decodeShareView(new URL(url).search)).toEqual({ lat: 10, lng: 20, zoom: 5 });
   });
 

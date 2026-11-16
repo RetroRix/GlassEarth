@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { config } from './middleware';
+import { NextRequest } from 'next/server';
+import { config, middleware } from './middleware';
 import { version as maplibreVersion } from 'maplibre-gl/package.json';
 
 const vendorDir = fileURLToPath(new URL('../public/vendor/maplibre/', import.meta.url));
@@ -38,5 +39,58 @@ describe('map runtime assets', () => {
     expect(matches('/')).toBe(true);
     expect(matches('/merch')).toBe(true);
     expect(matches('/api/cctv')).toBe(false);
+  });
+});
+
+/* The front door took / on 2026-11-15 and the app moved to /app. Every
+   link shared while the app lived at the root carries app query params;
+   the middleware must carry those visits into the app with the query
+   string untouched, and must leave a bare root visit (and unrelated
+   params like utm tags) on the door. */
+describe('front door redirect', () => {
+  const event = { waitUntil: () => {} } as never;
+  const run = (url: string) => middleware(new NextRequest(url), event);
+
+  it('carries a layers link into the app with its params intact', () => {
+    const res = run('https://www.glassearthlive.com/?layers=maritime,satellites,cctv');
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://www.glassearthlive.com/app?layers=maritime,satellites,cctv');
+  });
+
+  it('carries a shared view and a live target into the app', () => {
+    const res = run('https://www.glassearthlive.com/?lat=31.7619&lon=-106.485&zoom=9&flight=abc123&cs=UAL123');
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get('location')!);
+    expect(loc.pathname).toBe('/app');
+    expect(loc.searchParams.get('lat')).toBe('31.7619');
+    expect(loc.searchParams.get('lon')).toBe('-106.485');
+    expect(loc.searchParams.get('flight')).toBe('abc123');
+    expect(loc.searchParams.get('cs')).toBe('UAL123');
+  });
+
+  it('carries ship, camera, oi and spooky params into the app', () => {
+    for (const q of ['ship=123456789&sn=Ever+Given', 'cam=txdot-elp-123', 'oi=run-1', 'spooky=1']) {
+      const res = run(`https://www.glassearthlive.com/?${q}`);
+      expect(res.status, q).toBe(307);
+      expect(new URL(res.headers.get('location')!).pathname, q).toBe('/app');
+    }
+  });
+
+  it('leaves a bare root visit on the door', () => {
+    const res = run('https://www.glassearthlive.com/');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+  });
+
+  it('leaves unrelated params (utm tags) on the door', () => {
+    const res = run('https://www.glassearthlive.com/?utm_source=facebook');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+  });
+
+  it('never redirects the app route itself', () => {
+    const res = run('https://www.glassearthlive.com/app?layers=cctv');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
   });
 });

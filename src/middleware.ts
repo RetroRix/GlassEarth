@@ -1,9 +1,29 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest, NextFetchEvent } from 'next/server';
 
+/* The app lived at / until 2026-11-15, when the front door took the root
+   and the app moved to /app. Years of shared links point at the root with
+   app query params, so a root visit carrying any of them is redirected to
+   /app with the full query string intact — the app reads every one of
+   these from window.location.search on load (share-view decode, layers
+   restore, the OI forecast link, the seasonal preview). A bare root visit
+   gets the door. The list is the complete page-level inventory:
+   lat/lon/zoom/brg/pit/cam (shared view), flight/cs + ship/sn (shared
+   live target), layers, oi, spooky. */
+const APP_QUERY_PARAMS = [
+  'layers', 'lat', 'lon', 'zoom', 'brg', 'pit', 'cam',
+  'flight', 'cs', 'ship', 'sn', 'oi', 'spooky',
+];
+
 export function middleware(request: NextRequest, event: NextFetchEvent) {
   const url = request.nextUrl.pathname;
-  
+
+  if (url === '/' && APP_QUERY_PARAMS.some((k) => request.nextUrl.searchParams.has(k))) {
+    const target = request.nextUrl.clone();
+    target.pathname = '/app';
+    return NextResponse.redirect(target);
+  }
+
   const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '127.0.0.1';
   const userAgent = request.headers.get('user-agent') || 'Unknown OSIRIS Client';
   

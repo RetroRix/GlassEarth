@@ -162,7 +162,12 @@ export async function copyShareLink(url: string): Promise<boolean> {
 }
 
 export function buildShareUrl(origin: string, view: SharedView, layers?: string): string {
-  return `${origin}/?${encodeShareParams(view, layers).toString()}`;
+  /* The app moved from / to /app on 2026-11-15 (the front door took the
+     root), so new links name /app directly. Links already in the wild
+     point at the root with these same params and still land in the app:
+     the middleware redirects any root visit carrying app params to /app
+     with its query string intact. */
+  return `${origin}/app?${encodeShareParams(view, layers).toString()}`;
 }
 
 function parseNumber(raw: string | null): number | null {
