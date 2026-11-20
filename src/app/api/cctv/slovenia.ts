@@ -27,7 +27,7 @@ const API = 'https://api.livetrafik.com/api/v1/cameras';
 const PER_PAGE = 100;
 /** Slovenia; a row outside it is mis-geocoded. */
 const BOUNDS = { minLat: 45.4, maxLat: 47.0, minLng: 13.3, maxLng: 16.7 };
-const IMAGE = /^https:\/\/kamere\.dars\.si\/kamere\/[\w/-]+\.jpe?g$/;
+const IMAGE_ORIGIN = 'https://kamere.dars.si';
 
 /** One camera as the NAP-catalogue API lists it (only the fields we read). */
 export interface SloveniaCameraRow {
@@ -44,14 +44,27 @@ interface CameraPage {
   meta?: { total_pages?: number };
 }
 
+/** A snapshot link, only when it is a JPEG under kamere.dars.si/kamere. */
+function pictureLink(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.origin !== IMAGE_ORIGIN || url.username || url.password) return null;
+  return url.pathname.startsWith('/kamere/') && /\.jpe?g$/i.test(url.pathname) ? url.href : null;
+}
+
 /** Map one catalogue row to a camera, or null when it has no place in Slovenia or no DARS picture. */
 export function mapSloveniaCamera(row: SloveniaCameraRow): CctvCamera | null {
   const id = row?.id;
   const { latitude: lat, longitude: lng } = row ?? {};
   if (!Number.isInteger(id) || typeof lat !== 'number' || typeof lng !== 'number') return null;
   if (lat < BOUNDS.minLat || lat > BOUNDS.maxLat || lng < BOUNDS.minLng || lng > BOUNDS.maxLng) return null;
-  const image = row.image_url ?? '';
-  if (!IMAGE.test(image)) return null;
+  const image = pictureLink(row.image_url);
+  if (!image) return null;
   return {
     id: `si-${id}`,
     lat,
