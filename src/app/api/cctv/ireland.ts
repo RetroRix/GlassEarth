@@ -85,16 +85,7 @@ export function mapTiiCamera(f: TiiFeature): CctvCamera | null {
 }
 
 export async function fetchIrelandCameras(): Promise<CctvCamera[]> {
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'User-Agent': UA, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(QUERY),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`TII GraphQL HTTP ${res.status}`);
-  const data = (await res.json()) as { data?: { mapFeaturesQuery?: { mapFeatures?: TiiFeature[] } } } | null;
-  const list = data?.data?.mapFeaturesQuery?.mapFeatures;
-  if (!Array.isArray(list)) throw new Error('TII GraphQL returned no map features');
+  const list = await fetchFeatures();
 
   const byId = new Map<string, CctvCamera>();
   for (const f of list) {
@@ -104,4 +95,41 @@ export async function fetchIrelandCameras(): Promise<CctvCamera[]> {
   if (!byId.size) throw new Error('TII GraphQL returned no usable cameras');
   console.log(`[OSIRIS] Ireland cameras — TII: ${byId.size} of ${list.length} features`);
   return [...byId.values()];
+}
+
+/**
+ * The MapFeatures answer, with one retry.
+ *
+ * TII's front door intermittently answers the GraphQL POST with an HTML
+ * page and a 200 (seen 2026-11-20: the same request minutes apart got the
+ * challenge page once and clean JSON three times). One retry catches the
+ * blip; a second bad answer is a real outage and throws, so the region
+ * keeps its last good list.
+ */
+async function fetchFeatures(): Promise<TiiFeature[]> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'User-Agent': UA,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Referer: 'https://traffic.tii.ie/',
+        },
+        body: JSON.stringify(QUERY),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) throw new Error(`TII GraphQL HTTP ${res.status}`);
+      const data = (await res.json()) as { data?: { mapFeaturesQuery?: { mapFeatures?: TiiFeature[] } } } | null;
+      const list = data?.data?.mapFeaturesQuery?.mapFeatures;
+      if (!Array.isArray(list)) throw new Error('TII GraphQL returned no map features');
+      return list;
+    } catch (e) {
+      lastError = e;
+      if (attempt === 1) console.warn('[OSIRIS] Ireland cameras: first attempt failed, retrying:', e instanceof Error ? e.message : e);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('TII GraphQL failed');
 }

@@ -71,8 +71,23 @@ describe('Ireland TII cameras', () => {
     expect(cams.map(c => c.id)).toEqual(['ie-camera-91', 'ie-camera-92']);
   });
 
+  it('retries once when TII answers with an HTML page instead of JSON', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('<!DOCTYPE html><html>challenge</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: { mapFeaturesQuery: { mapFeatures: [feature()] } },
+      }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cams = await fetchIrelandCameras();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(cams.map(c => c.id)).toEqual(['ie-camera-91']);
+  });
+
   it('fails when TII cannot be read, so the last good list is kept', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(fetchIrelandCameras()).rejects.toThrow();
   });
 });
