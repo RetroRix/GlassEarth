@@ -507,6 +507,9 @@ const PAGED_REGION_BUDGET_MS = 30_000;
 // Mississippi harvests ~458 per-site pages per refresh: at the standard 12s
 // budget its refresh was abandoned every time, and on serverless the
 // abandoned work froze with the response, so the state never landed at all.
+// Ireland is here for the same reason: TII's GraphQL answers a cold
+// production request slowly enough that the 12s budget abandoned every
+// refresh and the region never landed (observed 2026-11-20).
 const SLOW_REGIONS = new Set(['florida', 'georgia', 'illinois', 'mississippi', 'texas', 'japan-rivers', 'ireland']);
 
 /**
