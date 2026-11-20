@@ -48,7 +48,7 @@ describe('Slovenia DARS cameras', () => {
     expect(mapSloveniaCamera(row({ image_url: 'https://kamere.dars.si/kamere/Maribor/IP_18_L06.1_Dragocova.jpg' }))).not.toBeNull();
     expect(mapSloveniaCamera(row({ image_url: 'https://kamere.dars.si/kamere/Golovec/CP_Kompolje_ABC_LJ_panorama.JPG' }))).not.toBeNull();
     expect(mapSloveniaCamera(row({ image_url: 'https://kamere.dars.si/kamere/msc2pics/Portal Unec smer LJ.jpg' }))?.feed_url)
-      .toContain('Portal%20Unec%20smer%20LJ.jpg');
+      .toContain('Portal%2520Unec%2520smer%2520LJ.jpg');
   });
 
   it('reads every catalogue page and dedupes by id', async () => {
