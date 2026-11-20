@@ -1,4 +1,4 @@
-import { proxiedImageUrl, type CctvCamera } from './types';
+import type { CctvCamera } from './types';
 
 /**
  * OSIRIS — Slovenia's road cameras (DARS / DRSI, via the NAP catalogue)
@@ -15,10 +15,10 @@ import { proxiedImageUrl, type CctvCamera } from './types';
  *
  * The pictures themselves are DARS's own, served from kamere.dars.si.
  * That host closes the connection on non-browser TLS fingerprints before
- * any HTTP is exchanged (measured 2026-11-20: curl and Node fetch both get
- * an empty reply), so the pictures are loaded through the app's image
- * proxy, which is also how this app serves every host that will not talk
- * to a browser page directly.
+ * any HTTP is exchanged (measured 2026-11-20: sandbox curl and Node fetch
+ * get an empty reply, and this app's production image proxy gets the same
+ * treatment — a 502), so the pictures cannot be proxied at all; browsers
+ * load them directly, the way every public page that embeds them does.
  *
  * Data: DARS / DRSI via the Slovenian National Access Point, CC BY-SA 4.0.
  */
@@ -72,7 +72,7 @@ export function mapSloveniaCamera(row: SloveniaCameraRow): CctvCamera | null {
     name: row.name?.trim() || 'DARS camera',
     city: row.region_name?.trim() || 'Slovenia',
     country: 'Slovenia',
-    feed_url: proxiedImageUrl(image),
+    feed_url: image,
     source: 'DARS Slovenia',
   };
 }

@@ -18,7 +18,7 @@ const row = (over: Partial<SloveniaCameraRow> = {}): SloveniaCameraRow => ({
 });
 
 describe('Slovenia DARS cameras', () => {
-  it('maps a catalogue row to a camera, trimming the name and proxying the DARS picture', () => {
+  it('maps a catalogue row to a camera, trimming the name', () => {
     expect(mapSloveniaCamera(row())).toEqual({
       id: 'si-6671127',
       lat: 46.28915,
@@ -26,7 +26,7 @@ describe('Slovenia DARS cameras', () => {
       name: 'R2-432, Rogatec - Majšperk, Stoperce',
       city: 'Savinjska',
       country: 'Slovenia',
-      feed_url: '/api/cctv/proxy?url=https%3A%2F%2Fkamere.dars.si%2Fkamere%2Fdrsi_vgrc%2FStoperce_stp1_0001.jpg',
+      feed_url: 'https://kamere.dars.si/kamere/drsi_vgrc/Stoperce_stp1_0001.jpg',
       source: 'DARS Slovenia',
     });
   });
@@ -48,7 +48,7 @@ describe('Slovenia DARS cameras', () => {
     expect(mapSloveniaCamera(row({ image_url: 'https://kamere.dars.si/kamere/Maribor/IP_18_L06.1_Dragocova.jpg' }))).not.toBeNull();
     expect(mapSloveniaCamera(row({ image_url: 'https://kamere.dars.si/kamere/Golovec/CP_Kompolje_ABC_LJ_panorama.JPG' }))).not.toBeNull();
     expect(mapSloveniaCamera(row({ image_url: 'https://kamere.dars.si/kamere/msc2pics/Portal Unec smer LJ.jpg' }))?.feed_url)
-      .toContain('Portal%2520Unec%2520smer%2520LJ.jpg');
+      .toContain('Portal%20Unec%20smer%20LJ.jpg');
   });
 
   it('reads every catalogue page and dedupes by id', async () => {
