@@ -31,6 +31,7 @@ import { fetchLondonCameras } from './london';
 import { fetchIrelandCameras } from './ireland';
 import { fetchJapanRiverCameras } from './japan-rivers';
 import { fetchSloveniaCameras } from './slovenia';
+import { fetchCroatiaCameras } from './croatia';
 import { fetchUtahCameras } from './utah';
 import { fetchIcelandCameras } from './iceland';
 import { fetchTaiwanCameras } from './taiwan';
@@ -388,6 +389,7 @@ const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'uk': fetchLondonCameras,
   'ireland': fetchIrelandCameras,
   'slovenia': fetchSloveniaCameras,
+  'croatia': fetchCroatiaCameras,
   'us-west': async () => { const [w, c] = await Promise.all([fetchWSDOTCameras(), fetchCaltransCameras()]); return [...w, ...c]; },
   'us-east': fetchUSEastCameras,
   'canada': fetchCanadaCameras,
@@ -765,6 +767,8 @@ function getRegionsForBounds(lat: number, lng: number, radius: number): string[]
   if (lat > 51.2 && lat < 55.5 && lng > -10.8 && lng < -5.8) regions.push('ireland');
   // Slovenia (DARS/DRSI) — explicit, since the broad europe box carries none of the NAP catalogue
   if (lat > 45.4 && lat < 47.0 && lng > 13.3 && lng < 16.7) regions.push('slovenia');
+  // Croatia (HAK) — explicit, since the broad europe box carries none of HAK's cameras
+  if (lat > 42.3 && lat < 46.6 && lng > 13.4 && lng < 19.5) regions.push('croatia');
   // US-East
   if (lat > 24 && lat < 49 && lng > -85 && lng < -66) regions.push('us-east');
   // US-West
