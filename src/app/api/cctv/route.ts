@@ -507,7 +507,7 @@ const PAGED_REGION_BUDGET_MS = 30_000;
 // Mississippi harvests ~458 per-site pages per refresh: at the standard 12s
 // budget its refresh was abandoned every time, and on serverless the
 // abandoned work froze with the response, so the state never landed at all.
-const SLOW_REGIONS = new Set(['florida', 'georgia', 'illinois', 'mississippi', 'texas', 'japan-rivers']);
+const SLOW_REGIONS = new Set(['florida', 'georgia', 'illinois', 'mississippi', 'texas', 'japan-rivers', 'ireland']);
 
 /**
  * Regions are fetched a few at a time, not all forty-eight at once.
