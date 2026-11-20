@@ -1,4 +1,5 @@
 import type { CctvCamera } from './types';
+import { stealthFetch } from '@/lib/stealthFetch';
 
 /**
  * OSIRIS — Ireland's road cameras (Transport Infrastructure Ireland)
@@ -18,7 +19,6 @@ import type { CctvCamera } from './types';
  * upstream ireland.ts (MIT), restyled to this repo's source conventions.
  */
 
-const UA = 'OSIRIS/5.0 (+https://osirisai.live)';
 const ENDPOINT = 'https://traffic.tii.ie/api/graphql';
 /** The island of Ireland; a row outside it is mis-geocoded. */
 const BOUNDS = { minLat: 51.2, maxLat: 55.5, minLng: -10.8, maxLng: -5.8 };
@@ -98,22 +98,24 @@ export async function fetchIrelandCameras(): Promise<CctvCamera[]> {
 }
 
 /**
- * The MapFeatures answer, with one retry.
+ * The MapFeatures answer, with one retry, read through stealthFetch.
  *
  * TII's front door intermittently answers the GraphQL POST with an HTML
- * page and a 200 (seen 2026-11-20: the same request minutes apart got the
- * challenge page once and clean JSON three times). One retry catches the
- * blip; a second bad answer is a real outage and throws, so the region
- * keeps its last good list.
+ * challenge page and a 200 instead of JSON (seen 2026-11-20: identical
+ * requests minutes apart got the challenge page and clean JSON in turn),
+ * and a plain datacenter request is the likeliest thing to be challenged —
+ * so the query goes out with stealthFetch's browser headers, the way the
+ * other carsprogram-platform sources here are read. One retry catches the
+ * remaining blips; a second bad answer is a real outage and throws, so the
+ * region keeps its last good list.
  */
 async function fetchFeatures(): Promise<TiiFeature[]> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const res = await fetch(ENDPOINT, {
+      const res = await stealthFetch(ENDPOINT, {
         method: 'POST',
         headers: {
-          'User-Agent': UA,
           'Content-Type': 'application/json',
           Accept: 'application/json',
           Referer: 'https://traffic.tii.ie/',

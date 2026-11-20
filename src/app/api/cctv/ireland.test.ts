@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { stealthFetch } from '@/lib/stealthFetch';
 import { fetchIrelandCameras, mapTiiCamera, type TiiFeature } from './ireland';
 
+vi.mock('@/lib/stealthFetch', () => ({ stealthFetch: vi.fn(), stealthHeaders: vi.fn(() => ({})) }));
+
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -54,7 +56,7 @@ describe('Ireland TII cameras', () => {
   });
 
   it('reads the GraphQL answer, dedupes by uri, and keeps only cameras', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    vi.mocked(stealthFetch).mockResolvedValue(Response.json({
       data: {
         mapFeaturesQuery: {
           mapFeatures: [
@@ -65,19 +67,18 @@ describe('Ireland TII cameras', () => {
           ],
         },
       },
-    }), { status: 200 })));
+    }));
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const cams = await fetchIrelandCameras();
     expect(cams.map(c => c.id)).toEqual(['ie-camera-91', 'ie-camera-92']);
   });
 
   it('retries once when TII answers with an HTML page instead of JSON', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi.mocked(stealthFetch)
       .mockResolvedValueOnce(new Response('<!DOCTYPE html><html>challenge</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+      .mockResolvedValueOnce(Response.json({
         data: { mapFeaturesQuery: { mapFeatures: [feature()] } },
-      }), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
+      }));
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const cams = await fetchIrelandCameras();
@@ -86,7 +87,7 @@ describe('Ireland TII cameras', () => {
   });
 
   it('fails when TII cannot be read, so the last good list is kept', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+    vi.mocked(stealthFetch).mockResolvedValue(new Response('down', { status: 503 }));
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(fetchIrelandCameras()).rejects.toThrow();
   });
