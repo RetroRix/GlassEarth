@@ -27,6 +27,7 @@ import { fetchFinlandCameras } from './finland';
 import { fetchSwedenCameras } from './sweden';
 import { fetchHongKongCameras } from './hongkong';
 import { fetchSingaporeCameras } from './singapore';
+import { fetchLondonCameras } from './london';
 import { fetchJapanRiverCameras } from './japan-rivers';
 import { fetchUtahCameras } from './utah';
 import { fetchIcelandCameras } from './iceland';
@@ -106,24 +107,9 @@ import {
 
 // ═══ CAMERA SOURCE DEFINITIONS ═══
 
-// ── UK: Transport for London JamCams (~900) ──
-async function fetchTfLCameras(): Promise<any[]> {
-  try {
-    const res = await stealthFetch('https://api.tfl.gov.uk/Place/Type/JamCam', { signal: AbortSignal.timeout(12000) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data || []).map((cam: any) => {
-      const imgProp = cam.additionalProperties?.find((p: any) => p.key === 'imageUrl');
-      const camId = cam.id?.replace('JamCams_', '') || '';
-      return {
-        id: `tfl-${cam.id}`, lat: cam.lat, lng: cam.lon,
-        name: cam.commonName || 'London JamCam', city: 'London', country: 'UK',
-        feed_url: imgProp?.value || `https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/${camId}.jpg`,
-        source: 'TfL',
-      };
-    }).filter((c: any) => c.lat && c.lng);
-  } catch (e) { return []; }
-}
+// ── UK: Transport for London JamCams ──
+// Lives in its own module now: ./london (TfL's keyless Unified API list,
+// cameras TfL flags unavailable left out, each camera's MP4 clip wired).
 
 // ── US-WEST: WSDOT Washington State + Caltrans California ──
 // Both live in their own modules now: ./washington (WSDOT's FeatureServer,
@@ -397,7 +383,7 @@ type RegionFetcher = () => Promise<any[]>;
 
 const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'middle-east': fetchMiddleEastCameras,
-  'uk': fetchTfLCameras,
+  'uk': fetchLondonCameras,
   'us-west': async () => { const [w, c] = await Promise.all([fetchWSDOTCameras(), fetchCaltransCameras()]); return [...w, ...c]; },
   'us-east': fetchUSEastCameras,
   'canada': fetchCanadaCameras,
