@@ -23,7 +23,7 @@ export interface CctvCamera {
  * there in development and gone in production. The proxy re-serves it over
  * https. A host added here must also be in the proxy's own allowlist.
  */
-const PROXY_IMAGE_HOSTS = ['infobanjirjps.selangor.gov.my'];
+const PROXY_IMAGE_HOSTS = ['infobanjirjps.selangor.gov.my', 'kamere.dars.si'];
 
 /** The URL a browser can actually load this still from. */
 export function proxiedImageUrl(url: string): string {

@@ -26,6 +26,9 @@ const ALLOWED_HOSTS = [
   'eismoinfo.lt',
   // Serves over plain http, which an https page blocks as mixed content.
   'infobanjirjps.selangor.gov.my',
+  // DARS Slovenia — closes the connection on non-browser TLS fingerprints,
+  // so a browser page cannot load its camera pictures directly either.
+  'kamere.dars.si',
 ];
 
 // Taiwan Highway Bureau cameras are DigiEver encoders, and they emit a

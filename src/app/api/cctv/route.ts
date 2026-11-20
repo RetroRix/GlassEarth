@@ -30,6 +30,7 @@ import { fetchSingaporeCameras } from './singapore';
 import { fetchLondonCameras } from './london';
 import { fetchIrelandCameras } from './ireland';
 import { fetchJapanRiverCameras } from './japan-rivers';
+import { fetchSloveniaCameras } from './slovenia';
 import { fetchUtahCameras } from './utah';
 import { fetchIcelandCameras } from './iceland';
 import { fetchTaiwanCameras } from './taiwan';
@@ -386,6 +387,7 @@ const RAW_REGION_FETCHERS: Record<string, RegionFetcher> = {
   'middle-east': fetchMiddleEastCameras,
   'uk': fetchLondonCameras,
   'ireland': fetchIrelandCameras,
+  'slovenia': fetchSloveniaCameras,
   'us-west': async () => { const [w, c] = await Promise.all([fetchWSDOTCameras(), fetchCaltransCameras()]); return [...w, ...c]; },
   'us-east': fetchUSEastCameras,
   'canada': fetchCanadaCameras,
@@ -761,6 +763,8 @@ function getRegionsForBounds(lat: number, lng: number, radius: number): string[]
   if (lat > 49 && lat < 61 && lng > -8 && lng < 2) regions.push('uk');
   // Ireland (TII) — explicit, since the broad europe box carries none of TII's cameras
   if (lat > 51.2 && lat < 55.5 && lng > -10.8 && lng < -5.8) regions.push('ireland');
+  // Slovenia (DARS/DRSI) — explicit, since the broad europe box carries none of the NAP catalogue
+  if (lat > 45.4 && lat < 47.0 && lng > 13.3 && lng < 16.7) regions.push('slovenia');
   // US-East
   if (lat > 24 && lat < 49 && lng > -85 && lng < -66) regions.push('us-east');
   // US-West
