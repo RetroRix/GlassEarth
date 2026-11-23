@@ -6,7 +6,7 @@ import {
   Plane, Satellite, Sun, Moon, AlertTriangle, Camera,
   CloudLightning, CloudSun, Ship, Network, Database, Ghost,
   Flame, Tv, Radio, Mountain, Anchor, Megaphone, SlidersHorizontal, Bus,
-  Pin, PinOff, ListChecks, Telescope, Bell
+  Pin, PinOff, ListChecks, Telescope, Bell, BookOpen
 } from 'lucide-react';
 import StyleStudio from './StyleStudio';
 import BarEdgeHandle from './BarEdgeHandle';
@@ -47,6 +47,8 @@ interface LayerPanelProps {
   smartAlertsUnread?: number;
   /** Opens the Sunrise Chaser panel — cameras on the dawn line right now. */
   onOpenSunriseChaser?: () => void;
+  /** Arms the Place Dossier: the next map tap opens that spot's dossier. */
+  onOpenPlaceDossier?: () => void;
 }
 
 interface LayerDef {
@@ -245,7 +247,7 @@ function SubLayerStem() {
   );
 }
 
-function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false, onOpenMissions, onOpenLookUp, onOpenSmartAlerts, smartAlertsUnread = 0, onOpenSunriseChaser }: LayerPanelProps) {
+function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, capabilities = {}, terrainStatus = 'idle', onTerrainRetry, onTerrainFocus, on3DModeSelected, revealed = true, liveStatus, rideActive = false, onOpenMissions, onOpenLookUp, onOpenSmartAlerts, smartAlertsUnread = 0, onOpenSunriseChaser, onOpenPlaceDossier }: LayerPanelProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   /**
    * A pinned group stays open when the pointer leaves. Hover-only flyouts are
@@ -386,6 +388,18 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
             <span className="flex-1">
               <span className="block text-[11px] font-mono uppercase tracking-wider text-[var(--lp-fg-strong)]">Sunrise Chaser</span>
               <span className="mt-0.5 block text-[9px] text-[var(--lp-fg-faint)]">Ride the dawn line — cameras where the sun is rising right now</span>
+            </span>
+          </button>
+        )}
+        {onOpenPlaceDossier && (
+          <button
+            onClick={onOpenPlaceDossier}
+            className="flex w-full items-center gap-3 rounded-md border border-[var(--lp-border)] px-2 py-2.5 text-left hover:bg-[var(--lp-hover)] transition-colors"
+          >
+            <BookOpen className="h-4 w-4 shrink-0" style={{ color: 'var(--gold-primary)' }} />
+            <span className="flex-1">
+              <span className="block text-[11px] font-mono uppercase tracking-wider text-[var(--lp-fg-strong)]">Place Dossier</span>
+              <span className="mt-0.5 block text-[9px] text-[var(--lp-fg-faint)]">Tap any spot on the map — its cameras, weather, radio, flights, ISS pass, sun and quakes in one panel</span>
             </span>
           </button>
         )}
@@ -750,6 +764,21 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
           aria-label="Open Sunrise Chaser"
         >
           <Sun
+            className="transition-all duration-500"
+            style={{ width: 15, height: 15, color: 'rgba(255,255,255,0.35)' }}
+          />
+        </button>
+      )}
+
+      {/* Place Dossier — arm it, then tap the spot on the map. */}
+      {onOpenPlaceDossier && (
+        <button
+          onClick={onOpenPlaceDossier}
+          className="w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-500 cursor-pointer"
+          title="Place Dossier — tap a spot on the map for everything live about it"
+          aria-label="Open Place Dossier"
+        >
+          <BookOpen
             className="transition-all duration-500"
             style={{ width: 15, height: 15, color: 'rgba(255,255,255,0.35)' }}
           />

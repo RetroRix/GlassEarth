@@ -201,6 +201,10 @@ interface OsirisMapProps {
   routePickMode?: boolean;
   /** A map click while routePickMode is armed. */
   onRoutePick?: (pt: { lat: number; lng: number }) => void;
+  /** The Place Dossier is armed to take its spot from a map click. */
+  placePickMode?: boolean;
+  /** A map click while placePickMode is armed. */
+  onPlacePick?: (pt: { lat: number; lng: number }) => void;
   /** A piece of OI's analysis was clicked: an arc ("link:<id>") or a point ("a:<actor>", "e:<event>"…); null for empty map. */
   onOiSelect?: (key: string | null) => void;
   /** The pointer is over a piece of OI's analysis, or has left it. */
@@ -286,7 +290,7 @@ interface AlertPinFeature {
   properties: AlertPinProps;
 }
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, onTrafficSimStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, shareFocus = null, focusSatellite = null }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, onReady, flyToLocation, alertPinIds = null, openCameraId = null, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, onLayerOff, onDateCompareSwiped, mapStyle = 'dark', scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, onTransitStatus, onTrafficSimStatus, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {}, onOiGlobe, onOiSelect, onOiHover, onOiFollow, oiHighlight = null, cockpitTarget = null, cockpitRoute = null, onCockpitGrab, onCockpitLost, onCockpitSatelliteFailed, routeFlight = null, onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab, routePickMode = false, onRoutePick, placePickMode = false, onPlacePick, shareFocus = null, focusSatellite = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -322,6 +326,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   const routeFlightCbRef = useRef({ onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab });
   const routePickRef = useRef(routePickMode);
   const routePickCbRef = useRef(onRoutePick);
+  const placePickRef = useRef(placePickMode);
+  const placePickCbRef = useRef(onPlacePick);
   /* The Live Alert pins currently drawn, and the opener for one of them, so
      the feed's locate button can land on a pin and open it. */
   const alertPinsRef = useRef<AlertPinFeature[]>([]);
@@ -3263,7 +3269,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Keep the refs the cockpit loop reads pointed at the latest render.
   useEffect(() => { dataRef.current = data; });
   useEffect(() => { cockpitGrabRef.current = onCockpitGrab; cockpitLostRef.current = onCockpitLost; cockpitRouteRef.current = cockpitRoute; cockpitTargetRef.current = cockpitTarget; cockpitSatFailedRef.current = onCockpitSatelliteFailed; if (!cockpitTarget) probedSatelliteRideRef.current = null; });
-  useEffect(() => { routeFlightRef.current = routeFlight; routeFlightCbRef.current = { onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab }; routePickRef.current = routePickMode; routePickCbRef.current = onRoutePick; });
+  useEffect(() => { routeFlightRef.current = routeFlight; routeFlightCbRef.current = { onRouteFlightProgress, onRouteFlightEnd, onRouteFlightGrab }; routePickRef.current = routePickMode; routePickCbRef.current = onRoutePick; placePickRef.current = placePickMode; placePickCbRef.current = onPlacePick; });
 
   /* ── FLY THE ROUTE (lib/route-flight) ──
      A scenic camera tour along the planned route: pitched, bearing
@@ -3422,6 +3428,26 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       try { canvas.style.cursor = prevCursor; } catch { /* map gone */ }
     };
   }, [mapReady, routePickMode]);
+
+  /* ── PLACE DOSSIER PICKING ──
+     While the dossier is armed, the next map click is its spot, not an
+     entity selection: same contract as route picking — crosshair
+     canvas, click reported up, guarded on the map being ready. */
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !placePickMode) return;
+    const map = mapRef.current;
+    const canvas = map.getCanvas();
+    const prevCursor = canvas.style.cursor;
+    canvas.style.cursor = 'crosshair';
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      placePickCbRef.current?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+    };
+    map.on('click', onClick);
+    return () => {
+      map.off('click', onClick);
+      try { canvas.style.cursor = prevCursor; } catch { /* map gone */ }
+    };
+  }, [mapReady, placePickMode]);
 
   /* ── COCKPIT SKY (lib/cockpit-pfd) ──
      At the ride's 76° pitch the ground plane runs out before the top

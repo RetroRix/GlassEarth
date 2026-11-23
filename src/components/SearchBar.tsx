@@ -28,6 +28,9 @@ interface SearchBarProps {
   onClose?: () => void;
   /** Hand a place to Directions as the destination. */
   onDirections?: (place: PlaceLike) => void;
+  /** The place the visitor picked, label and all — the Place Dossier
+   *  names its spot from this when the dossier opens on the same place. */
+  onPlacePicked?: (place: PlaceLike) => void;
   /** Inside another container (the phone drawer): no frame of its own. */
   embedded?: boolean;
 }
@@ -53,7 +56,7 @@ const parseCoords = (s: string): { lat: number; lng: number } | null => {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 ? { lat, lng } : null;
 };
 
-export default function SearchBar({ onLocate, center = null, onClose, onDirections, embedded = false }: SearchBarProps) {
+export default function SearchBar({ onLocate, center = null, onClose, onDirections, onPlacePicked, embedded = false }: SearchBarProps) {
   const [value, setValue] = useState('');
   const [results, setResults] = useState<Hit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -174,6 +177,7 @@ export default function SearchBar({ onLocate, center = null, onClose, onDirectio
   const go = (h: Hit) => {
     if (h.kind === 'current') { void locate(); return; }
     onLocate(h.lat, h.lng, h.zoom);
+    onPlacePicked?.({ label: h.label, context: h.context, lat: h.lat, lng: h.lng, kind: h.kind });
     setRecent(rememberPlace({ label: h.label, context: h.context, lat: h.lat, lng: h.lng, kind: h.kind }));
     setValue('');
     setResults([]);

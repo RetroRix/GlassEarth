@@ -52,6 +52,9 @@ import LaunchesPanel from '@/components/LaunchesPanel';
 import LookUpPanel from '@/components/LookUpPanel';
 import SmartAlertsPanel, { useSmartAlertsEngine } from '@/components/SmartAlertsPanel';
 import SunriseChaserPanel from '@/components/SunriseChaserPanel';
+import PlaceDossierPanel, { type DossierTarget } from '@/components/PlaceDossierPanel';
+import { distanceKm } from '@/lib/smart-alerts';
+import type { DossierCameraLike, WeatherEventLike } from '@/lib/place-dossier';
 import RadioNowPlaying from '@/components/RadioNowPlaying';
 import RadioTuner from '@/components/RadioTuner';
 import MissionsCard from '@/components/MissionsCard';
@@ -291,6 +294,12 @@ export default function Dashboard() {
   const [showLookUp, setShowLookUp] = useState(false);
   const [showSmartAlerts, setShowSmartAlerts] = useState(false);
   const [showSunriseChaser, setShowSunriseChaser] = useState(false);
+  /* ── Place Dossier (weekly pick, 2026-11-23) — armed from the layer
+     panel, the next map tap picks its spot; the search pick's label is
+     kept so a dossier opened on that same spot carries its real name. */
+  const [placePickArmed, setPlacePickArmed] = useState(false);
+  const [dossierTarget, setDossierTarget] = useState<DossierTarget | null>(null);
+  const [lastSearchPlace, setLastSearchPlace] = useState<{ label: string; lat: number; lng: number } | null>(null);
   /* Dead-stream reports from the one playback owner — the Radio Tuner
      listens and auto-skips; the camera viewer's Listen to this place
      consumes it too, for its own stations only. */
@@ -888,7 +897,7 @@ export default function Dashboard() {
     panelOpen:
       showSpaceCam || showWall || showTv || showTvWall || showStations || showTuner ||
       showSpotting || showLookUp || showSmartAlerts || showSunriseChaser || showMarkets || showAlerts || showOi || showDrawing ||
-      showDirections || showDesktopSearch || showArcGIS || showRemote ||
+      showDirections || showDesktopSearch || showArcGIS || showRemote || !!dossierTarget ||
       shareOpen,
   });
   /** What is selected on the globe or in the panel: a point's key, or "link:<id>" for an arc. */
@@ -2675,6 +2684,17 @@ export default function Dashboard() {
           onRouteFlightGrab={pauseRouteFlight}
           routePickMode={routePickArmed}
           onRoutePick={(pt) => setPickedPoint({ ...pt, ts: Date.now() })}
+          placePickMode={placePickArmed}
+          onPlacePick={(pt) => {
+            setPlacePickArmed(false);
+            setShowLookUp(false);
+            setShowSmartAlerts(false);
+            setShowSunriseChaser(false);
+            const hint = lastSearchPlace && distanceKm(pt.lat, pt.lng, lastSearchPlace.lat, lastSearchPlace.lng) <= 1
+              ? lastSearchPlace.label
+              : null;
+            setDossierTarget({ lat: pt.lat, lng: pt.lng, nameHint: hint });
+          }}
           navigating={Boolean(navSession)}
           drawMode={drawMode}
           onDrawProgress={setDrawProgress}
@@ -2794,6 +2814,7 @@ export default function Dashboard() {
           <div data-hud className="absolute top-[92px] left-1/2 -translate-x-1/2 z-[450] w-[min(560px,calc(100vw-180px))] pointer-events-auto">
             <motion.div initial={{ opacity: 0, y: -8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.98 }} transition={{ duration: 0.16 }}>
               <SearchBar center={mapCenter} onClose={() => setShowDesktopSearch(false)} onDirections={openDirectionsTo}
+                onPlacePicked={(p) => setLastSearchPlace({ label: p.label, lat: p.lat, lng: p.lng })}
                 onLocate={(lat, lng, zoom) => setFlyToLocation({ lat, lng, zoom, ts: Date.now() })} />
             </motion.div>
           </div>
@@ -2968,7 +2989,7 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} onOpenSmartAlerts={openSmartAlerts} smartAlertsUnread={smartAlerts.unread} onOpenSunriseChaser={() => setShowSunriseChaser(true)} /></div>}
+      {showLayers && !isMobile && <div data-hud><LayerPanel {...terrainPanelProps} revealed={revealed} rideActive={cockpitState.status === 'riding'} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => setMissionsOpenSignal(n => n + 1)} onOpenLookUp={() => setShowLookUp(true)} onOpenSmartAlerts={openSmartAlerts} smartAlertsUnread={smartAlerts.unread} onOpenSunriseChaser={() => setShowSunriseChaser(true)} onOpenPlaceDossier={() => { setRoutePickArmed(false); setPlacePickArmed(true); }} /></div>}
 
 
 
@@ -3563,7 +3584,7 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'9px'}}>NUC</div><div className="hud-value text-[10px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} onOpenSmartAlerts={() => { setMobilePanel(null); openSmartAlerts(); }} smartAlertsUnread={smartAlerts.unread} onOpenSunriseChaser={() => { setMobilePanel(null); setShowSunriseChaser(true); }} />
+                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} liveStatus={layerLiveStatus} onOpenMissions={() => { setMobilePanel(null); setMissionsOpenSignal(n => n + 1); }} onOpenLookUp={() => { setMobilePanel(null); setShowLookUp(true); }} onOpenSmartAlerts={() => { setMobilePanel(null); openSmartAlerts(); }} smartAlertsUnread={smartAlerts.unread} onOpenSunriseChaser={() => { setMobilePanel(null); setShowSunriseChaser(true); }} onOpenPlaceDossier={() => { setMobilePanel(null); setRoutePickArmed(false); setPlacePickArmed(true); }} />
                       <div className="mt-8">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       </div>
@@ -3579,7 +3600,7 @@ export default function Dashboard() {
                   {mobilePanel === 'intel' && <IntelFeed data={data} onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} />}
                   {mobilePanel === 'search' && (
                     <div className="space-y-2">
-                      <SearchBar embedded center={mapCenter} onDirections={openDirectionsTo} onLocate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
+                      <SearchBar embedded center={mapCenter} onDirections={openDirectionsTo} onPlacePicked={(p) => setLastSearchPlace({ label: p.label, lat: p.lat, lng: p.lng })} onLocate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       <SharePanel view={shareView} activeLayers={activeLayers} cameraId={shareCameraId} cameraName={shareCameraName} />
                     </div>
                   )}
@@ -3844,6 +3865,36 @@ export default function Dashboard() {
           cameras={(data.cameras ?? []) as WallCamera[]}
           onClose={() => setShowSunriseChaser(false)}
           onWatch={watchSunriseCamera}
+        />
+      )}
+
+      {/* ── Place Dossier armed: guidance over the map, where the tapping
+          happens — the next tap picks the spot. ── */}
+      {placePickArmed && !dossierTarget && (
+        <div className="absolute left-1/2 top-3 z-[450] flex w-[min(92vw,440px)] -translate-x-1/2 items-center gap-2 border border-[var(--gold-primary)]/50 bg-black/85 px-3 py-2 backdrop-blur-sm" role="status">
+          <span className="flex-1 font-mono text-[10px] uppercase leading-relaxed tracking-wider text-white/80">
+            Place Dossier — tap any spot on the map to open everything live about it
+          </span>
+          <button onClick={() => setPlacePickArmed(false)} className="shrink-0 rounded-sm border border-white/20 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-white hover:bg-white/10">
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ── Place Dossier panel — one spot, assembled from the app's own
+          feeds; cameras hand off to the viewer, radio to the one owner ── */}
+      {dossierTarget && (
+        <PlaceDossierPanel
+          target={dossierTarget}
+          cameras={(data.cameras ?? []) as DossierCameraLike[]}
+          weatherEvents={Array.isArray(data.weather_events) ? (data.weather_events as WeatherEventLike[]) : null}
+          flightData={data as Record<string, unknown>}
+          onClose={() => setDossierTarget(null)}
+          onOpenCamera={(cam) => { setDossierTarget(null); setActiveCamera({ ...cam, type: 'cctv' }); }}
+          onPlayRadio={(station) => playRadio(station, 'stations')}
+          radioFailure={radioFailure}
+          currentRadioUuid={radioStation?.uuid ?? null}
+          onFocusFlight={focusFlightFromPanel}
         />
       )}
 
