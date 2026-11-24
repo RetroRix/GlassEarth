@@ -19,6 +19,24 @@ describe('GET /api/proxy-tiles', () => {
     expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe('https://tiles-a.basemaps.cartocdn.com/vectortiles/carto.streets/v1/3/4/2.mvt');
   });
 
+  it('sends the GlassEarth agent string CARTO accepts (the old proxy string is 403-refused)', async () => {
+    const fetchMock = vi.fn(async () => new Response('tile'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await tile('https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json');
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as { headers: Record<string, string> };
+    expect(init.headers['User-Agent']).toContain('GlassEarth');
+    expect(init.headers['User-Agent']).not.toContain('Osiris-Tile-Proxy');
+  });
+
+  it('caches the style JSON for an hour, not a year', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await tile('https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=3600');
+  });
+
   it('drops the query string and fragment', async () => {
     const fetchMock = vi.fn(async () => new Response('tile'));
     vi.stubGlobal('fetch', fetchMock);
